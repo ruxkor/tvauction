@@ -1,4 +1,5 @@
 # -*- coding: utf-8; -*-
+import sys
 
 from collections import namedtuple,defaultdict
 from datetime import datetime
@@ -59,7 +60,7 @@ def gwd(slots,bidderInfos):
     return prob
 
 slot_amount = 168/4
-bidder_amount = 50/4
+bidder_amount = 50/2
 bidder_flatten = bidder_amount+1
 slots = [Slot(0,120) for i in range(slot_amount)]
 
@@ -68,15 +69,19 @@ rand_lengths = [60, 15, 45, 105, 90, 105, 15, 60, 30, 75, 90, 105, 105, 105, 60,
  75, 15, 30, 60, 60, 90, 120, 120, 60, 105]
 rand_times = [4, 4, 10, 7, 7, 3, 5, 3, 9, 5, 9, 2, 7, 3, 5, 3, 10, 1, 2, 3, 7, 4, 3, 7, 8, 8, 5, 10, 5, 6, 10, 2, 6, 8, 4, 10, 4, 2, 8, 2, 9, 7, 1, 4, 5, 8, 1, 10, 3, 5]
 
-bidderInfos = [BidderInfo( (1000+incr)*length*times/120,length,times,[]) for (incr,length,times) in zip(rand_increments,rand_lengths,rand_times)][:bidder_amount]
+bidderInfos = [
+    BidderInfo( (1000+incr)*length*times/120,length,times,[]) 
+    for (incr,length,times) 
+    in zip(rand_increments,rand_lengths,rand_times)
+][:bidder_amount]
 
-#slots = [Slot(1.0,120) for i in range(3)]
-#bidderInfos = [
-#    BidderInfo(1000,100,1,[]),
-#    BidderInfo(1000,100,1,[]),
-#    BidderInfo(1000,100,1,[]),
-#    BidderInfo(1800,100,3,[]),
-#]
+# slots = [Slot(1.0,120) for i in range(3)]
+# bidderInfos = [
+#     BidderInfo(1000,100,1,[]),
+#     BidderInfo(1000,100,1,[]),
+#     BidderInfo(1000,100,1,[]),
+#     BidderInfo(1800,100,3,[]),
+# ]
 
 #if bidder_amount>=bidder_flatten:
 #    bidderInfos[bidder_flatten:] = [bidderInfos[0]]*len(bidderInfos[bidder_flatten:])
@@ -85,26 +90,29 @@ prob = gwd(slots, bidderInfos)
 #print 'solving', datetime.now()-time_start
 
 print 'calculating wdp'
-prob.solve(pu.CPLEX(msg=False))
+solver = pu.GUROBI(msg=False)
+prob.solve(solver)
 winners = set(int(v.name[2:]) for v in prob.variables() if v.varValue==1 and v.name[:1]=='y')
 
 revenue_raw = pu.value(prob.objective)
 prices_raw = dict((w,bidderInfos[w].budget) for w in winners)
 
-print 'raw:\trevenue %d\tprices: %s' % (revenue_raw,sorted(prices_raw.iteritems()))
+print 'raw:\trevenue %d\tprices: %s\n\n' % (revenue_raw,sorted(prices_raw.iteritems()))
+
+print 'calculating vcg',
 prices_vcg = {}
 for w in winners:
     bidderInfosVcg = bidderInfos[:]
     winner = bidderInfosVcg[w]
     del bidderInfosVcg[w]
     prob_without_w = gwd(slots,bidderInfosVcg)
-    prob_without_w.solve(pu.CPLEX(msg=False))
+    prob_without_w.solve(solver)
     revenue_without_w = pu.value(prob_without_w.objective)
     prices_vcg[w] = winner.budget - (revenue_raw-revenue_without_w)
+    sys.stdout.write('.')
 revenue_vcg = sum(prices_vcg.itervalues())
 
-#print 'time', datetime.now()-time_start
-print 'vcg:\trevenue %d\tprices: %s' % (revenue_vcg,sorted(prices_vcg.iteritems()))
+print '\nvcg:\trevenue %d\tprices: %s\n\n' % (revenue_vcg,sorted(prices_vcg.iteritems()))
 
 iteration = 0
 prices_iterations = []
@@ -126,6 +134,7 @@ prob_ebpo += sum(pi.itervalues()) + epsilon*em
 for w in winners:
     prob_ebpo += pi[w]-em <= prices_vcg[w]
 
+ebpo_solver = pu.GUROBI(msg=False, mip=False)
 # abort after 1000 iterations (this should never happen)
 for cnt in xrange(1000):
     
@@ -146,7 +155,7 @@ for cnt in xrange(1000):
         prob_sep += prob_sep.variablesDict()['y_%d' % w] <= t[w]
     
     # solve it
-    prob_sep.solve(pu.CPLEX(msg=False))
+    prob_sep.solve(solver)
     
     # save the value: z( π^t )
     revenue_sep = pu.value(prob_sep.objective)
@@ -168,7 +177,7 @@ for cnt in xrange(1000):
     prob_ebpo += sum(pi[wnb] for wnb in winners_nonblocking) >= revenue_sep - sum(prices_t[wb] for wb in winners_blocking)
     
     # solve the ebpo (this problem can be formulated as a continous LP).
-    prob_ebpo.solve(pu.CPLEX(msg=False, mip=False))
+    prob_ebpo.solve(ebpo_solver)
     
     # updated the π_t list
     prices_t = dict((int(b.name[3:]),b.varValue) for b in prob_ebpo.variables() if b.name[:2]=='pi')
