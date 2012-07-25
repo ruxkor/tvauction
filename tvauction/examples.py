@@ -12,15 +12,26 @@ rand_lengths = [60, 15, 45, 105, 90, 105, 15, 60, 30, 75, 90, 105, 105, 105, 60,
 rand_times = [4, 4, 10, 7, 7, 3, 5, 3, 9, 5, 9, 2, 7, 3, 5, 3, 10, 1, 2, 3, 7, 4, 3, 7, 8, 8, 5, 10, 5, 6, 10, 2, 6, 8, 4, 10, 4, 2, 8, 2, 9, 7, 1, 4, 5, 8, 1, 10, 3, 5]
 
 
-def example1():
+def example0():
     '''tests core pricing.'''
     slots = [Slot(1.0,120) for i in range(3)]
     bidderInfos = [
-        BidderInfo(1000,100,1,[]),
-        BidderInfo(1000,100,1,[]),
-        BidderInfo(1000,100,1,[]),
-        BidderInfo(1800,100,3,[]),
-    ]    
+        BidderInfo(1000,100,1,[1]*len(slots)),
+        BidderInfo(1000,100,1,[1]*len(slots)),
+        BidderInfo(1000,100,1,[1]*len(slots)),
+        BidderInfo(1800,100,3,[1]*len(slots)),
+    ]
+    return processor_solve(slots,bidderInfos)
+
+def example1():
+    '''tests selective attributes.'''
+    slots = [Slot(1.0,120) for i in range(3)]
+    bidderInfos = [
+        BidderInfo(1000,100,1,[0,0,1]),
+        BidderInfo(1000,100,1,[1,1,0]),
+        BidderInfo(1000,100,1,[1,0,0]),
+        BidderInfo(1800,100,3,[1,1,2]),
+    ]
     return processor_solve(slots,bidderInfos)
 
 def example2():
@@ -28,7 +39,7 @@ def example2():
     slot_amount = 168
     bidder_amount = 30
     slots = [Slot(0,120) for i in range(slot_amount)]
-    bidderInfos = [BidderInfo(1000,100,10,[]) for i in range(bidder_amount)]
+    bidderInfos = [BidderInfo(1000,100,10,[1]*len(slots)) for i in range(bidder_amount)]
     return processor_solve(slots,bidderInfos)
 
 def example3():
@@ -37,7 +48,7 @@ def example3():
     bidder_amount = 30
     slots = [Slot(0,120) for i in range(slot_amount)]
     bidderInfos = [
-        BidderInfo(incr*times*length,length,times,[]) 
+        BidderInfo(incr*times*length,length,times,[1]*len(slots)) 
         for (incr,length,times) 
         in zip(rand_increments,rand_lengths,rand_times)
     ][:bidder_amount]
@@ -49,7 +60,7 @@ def example4():
     bidder_amount = 30
     slots = [Slot(0,120) for i in range(slot_amount)]
     bidderInfos = [
-        BidderInfo( (2*times*length)+incr,length,times,[]) 
+        BidderInfo( (2*times*length)+incr,length,times,[1]*len(slots)) 
         for (incr,length,times) 
         in zip(rand_increments,rand_lengths,rand_times)
     ][:bidder_amount]
@@ -59,7 +70,7 @@ if __name__=='__main__':
     import json
     from pprint import pprint as pp
     logging.basicConfig(level=logging.INFO)
-#    print json.dumps(example1())
+    print json.dumps(example1())
 #    print json.dumps(example2())
 #    print json.dumps(example3())
-    print json.dumps(example4())
+#    print json.dumps(example4())

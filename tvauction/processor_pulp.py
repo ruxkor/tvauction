@@ -8,7 +8,7 @@ import math
 import random
 
 Slot = namedtuple('Slot', ('price','length'))
-BidderInfo = namedtuple('BidderInfo', ('budget','length','attrib_min','attribs'))
+BidderInfo = namedtuple('BidderInfo', ('budget','length','attrib_min','attrib_values'))
 
 class Gwd(object):
     def __init__(self,msg=False,**kw):
@@ -18,37 +18,38 @@ class Gwd(object):
         '''the winner determination, implemented as a multiple knapsack problem'''
         slots_len = len(slots)
         bidderInfos_len = len(bidderInfos)
-        x = defaultdict(dict)
-        for i in range(slots_len):
-            for j in range(bidderInfos_len):
-                x[i][j] = pu.LpVariable('x_%d_%d' % (i,j),cat=pu.LpBinary) 
         
-        y = {}
-        for j in range(bidderInfos_len):
-            y[j] = pu.LpVariable('y_%d' % (j,), cat=pu.LpBinary)
-            
+        # x determines whether a bidder can air in a certain slot
+        x = pu.LpVariable.dicts('x', (range(slots_len),range(bidderInfos_len)), cat=pu.LpBinary)
+        
+        # y determines whether a winner has won
+        y = pu.LpVariable.dicts('y', (range(bidderInfos_len),), cat=pu.LpBinary)
+        
+        # initialize constraints
         cons = []
             
-        #    the sum of all assigned ad length has to be at most the length of the slot
+        # the sum of all assigned ad lengths has to be at most the length of the slot
         for (i,slot) in enumerate(slots):
             f = sum(bidderInfo.length*x[i][j] for (j,bidderInfo) in enumerate(bidderInfos))
             cons.append(f <= slot.length)
             
-        #    match the bidders' demands regarding their atttributes
+        # match the bidders' demands regarding their attributes
+        # attrib_values has to be a list with the same length
+        # as the slots list
         for (j,bidderInfo) in enumerate(bidderInfos):
-            M = slots_len+2
-            f = sum(x[i][j] for i in range(slots_len))
+            assert slots_len == len(bidderInfo.attrib_values)
+            M = sum(bidderInfo.attrib_values)+1
+            f = sum(attrib_value*x[i][j] for (i,attrib_value) in zip(range(slots_len),bidderInfo.attrib_values))
             f2 = bidderInfo.attrib_min - f
             cons.append(f <= M*y[j])
             cons.append(f2 <= M*(1-y[j]))
         
-        #    user can at most spend the maximum price
+        # user can at most spend the maximum price
         for (j,bidderInfo) in enumerate(bidderInfos):
             f = sum(bidderInfo.length*slot.price*x[i][j] for (i,slot) in enumerate(slots))
             cons.append(f <= bidderInfo.budget)
         
-            #    oovar domain=bool takes already care of min and max bounds
-    
+        # oovar domain=bool takes already care of min and max bounds
         prob = pu.LpProblem('gwd', pu.LpMaximize)
         prob += sum(bidderInfo.budget*y[j] for (j,bidderInfo) in enumerate(bidderInfos))
         
