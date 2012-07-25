@@ -2,12 +2,10 @@
 import sys
 import logging
 
-from collections import namedtuple,defaultdict
-from datetime import datetime
+from collections import namedtuple, defaultdict
 import pulp as pu
 import math
 import random
-from pprint import pprint as pp
 
 Slot = namedtuple('Slot', ('price','length'))
 BidderInfo = namedtuple('BidderInfo', ('budget','length','attrib_min','attribs'))
@@ -60,7 +58,7 @@ class Gwd(object):
         return prob
     
     def solve(self, prob, bidderInfos):
-        logging.info('calculating wdp')
+        logging.info('wdp:\tcalculating...')
         
         prob.solve(self.solver)
         winners = set(int(v.name[2:]) for v in prob.variables() if v.varValue==1 and v.name[:1]=='y')
@@ -68,7 +66,7 @@ class Gwd(object):
         revenue_raw = pu.value(prob.objective)
         prices_raw = dict((w,bidderInfos[w].budget) for w in winners)
         
-        logging.info('raw:\trevenue %d\tprices: %s\n\n' % (revenue_raw,sorted(prices_raw.iteritems())))
+        logging.info('raw:\trevenue %d\tprices: %s' % (revenue_raw,sorted(prices_raw.iteritems())))
         return (revenue_raw, prices_raw, winners)
         
 class Vcg(object):
@@ -76,7 +74,7 @@ class Vcg(object):
         self.gwd = gwd
         pass
     def calculate(self, slots, bidderInfos, revenue_raw, winners):
-        logging.info('calculating vcg...')
+        logging.info('vcg:\tcalculating...')
         prices_vcg = {}
         for (step,w) in enumerate(winners):
             bidderInfosVcg = bidderInfos[:]
@@ -153,7 +151,7 @@ class CorePricing(object):
             # extend and solve the ebpo problem:
             
             blocking_coalition = set(int(b.name[2:]) for b in prob_sep.variables() if b.varValue==1 and b.name[:1]=='y')
-            print 'sep:\tblocking: %s' % (sorted(blocking_coalition),)
+            logging.info('sep:\tblocking: %s' % (sorted(blocking_coalition),))
             
             winners_nonblocking = winners-blocking_coalition
             winners_blocking = winners&blocking_coalition
@@ -167,7 +165,7 @@ class CorePricing(object):
             # updated the π_t list
             prices_t = dict((int(b.name[3:]),b.varValue) for b in prob_ebpo.variables() if b.name[:2]=='pi')
             
-        revenue_core = pu.value(prob_ebpo.objective)
+        revenue_core = sum(prices_t.itervalues())
         logging.info('core:\trevenue %d\tprices: %s' % (
             revenue_core,
             ', '.join('%d->%d' % pt for pt in prices_t.iteritems())
@@ -175,35 +173,8 @@ class CorePricing(object):
         return (revenue_core, prices_t)
              
 
-slot_amount = 168/4
-bidder_amount = 50/2
-bidder_flatten = bidder_amount+1
-slots = [Slot(0,120) for i in range(slot_amount)]
-
-rand_increments = [175, 707, 312, 930, 276, 443, 468, 900, 855, 15, 658, 135, 238, 506, 244, 333, 912, 515, 458, 140, 925, 544, 720, 127, 545, 497, 962, 618, 900, 491, 515, 694, 738, 809, 75, 538, 422, 112, 106, 739, 1, 168, 554, 186, 762, 310, 888, 921, 164, 472, 538, 340, 267, 517, 412, 84, 941, 979, 713, 375, 501, 245, 149, 764, 74, 242, 385, 61, 910, 976, 775, 932, 661, 512, 757, 814, 443, 683, 795, 306, 955, 381, 202, 40, 908, 465, 755, 772, 125, 704, 934, 284, 712, 950, 645, 783, 525, 190, 587, 173]
-rand_lengths = [60, 15, 45, 105, 90, 105, 15, 60, 30, 75, 90, 105, 105, 105, 60, 15, 75, 30, 60, 60, 30, 60, 30, 30, 90, 60, 90, 45, 45, 120, 105, 60, 60, 120, 90, 15, 45, 45, 45, 60,
- 75, 15, 30, 60, 60, 90, 120, 120, 60, 105]
-rand_times = [4, 4, 10, 7, 7, 3, 5, 3, 9, 5, 9, 2, 7, 3, 5, 3, 10, 1, 2, 3, 7, 4, 3, 7, 8, 8, 5, 10, 5, 6, 10, 2, 6, 8, 4, 10, 4, 2, 8, 2, 9, 7, 1, 4, 5, 8, 1, 10, 3, 5]
-
-bidderInfos = [
-    BidderInfo( (1000+incr)*length*times/120,length,times,[]) 
-    for (incr,length,times) 
-    in zip(rand_increments,rand_lengths,rand_times)
-][:bidder_amount]
-
-slots = [Slot(1.0,120) for i in range(3)]
-bidderInfos = [
-    BidderInfo(1000,100,1,[]),
-    BidderInfo(1000,100,1,[]),
-    BidderInfo(1000,100,1,[]),
-    BidderInfo(1800,100,3,[]),
-]
-
-#if bidder_amount>=bidder_flatten:
-#    bidderInfos[bidder_flatten:] = [bidderInfos[0]]*len(bidderInfos[bidder_flatten:])
-
-def main():
-    gwd = Gwd(False)
+def solve(slots, bidderInfos):
+    gwd = Gwd(False,epgap=0.05)
     prob_gwd = gwd.generate(slots, bidderInfos)
     revenue_raw, prices_raw, winners = gwd.solve(prob_gwd, bidderInfos)
     
@@ -212,11 +183,29 @@ def main():
     
     core = CorePricing(gwd)
     revenue_core, prices_core = core.solve(prob_gwd, bidderInfos, winners, prices_raw, prices_vcg)
+    return {
+        'winners': list(winners),
+        'prices_raw': prices_raw,
+        'prices_vcg': prices_vcg,
+        'prices_core': prices_core
+    }
      
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
-    main()
+    import json
+    from optparse import OptionParser
+    parser = OptionParser()
+    parser.add_option('-l','--log', dest='loglevel', help='the log level', default='INFO')
+    parser.add_option('-s','--scenario', dest='scenario', help='the scenario')
+    options = parser.parse_args()[0]
+    numeric_level = getattr(logging, options.loglevel.upper(), None)
+    if not isinstance(numeric_level, int):
+        raise ValueError('Invalid log level: %s' % loglevel)
+    if not options.scenario:
+        raise ValueError('Scenario needed')
     
-
-
+    logging.basicConfig(level=numeric_level)
     
+    slots, bidderInfos = json.parse(options.scenario)
+    res = solve(slots, bidderInfos)
+    
+    print json.dumps(res,indent=2)    
