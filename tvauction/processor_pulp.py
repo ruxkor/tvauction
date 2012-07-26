@@ -14,8 +14,8 @@ Slot = namedtuple('Slot', ('id','price','length'))
 BidderInfo = namedtuple('BidderInfo', ('id','budget','length','attrib_min','attrib_values'))
 
 class Gwd(object):
-    def __init__(self,**kw):
-        self.solver = pu.GUROBI(**kw)
+    def __init__(self):
+        self.solver = pu.GUROBI(msg=True)
         self.prob = None
         
     def generate(self, slots, bidderInfos):
@@ -64,7 +64,8 @@ class Gwd(object):
         logging.info('raw:\trevenue %d\tprices: %s' % (revenue_raw,sorted(prices_raw.iteritems())))
         return (solver_status,(revenue_raw, prices_raw, winners))
     
-    def satisfyBestBidders(self, amount_to_satisfy, slots, bidder_info_set, slots_time_remaining, prob_vars):
+    @classmethod
+    def satisfyBestBidders(cls, amount_to_satisfy, bidders_satisfiable, slots, bidderInfos, slots_time_remaining, prob_vars):
         # premise: try to look for an amount of bidders that have the highest impact on the system
         # and position them directly. this results, of course, in a suboptimal solution value.
 
@@ -75,8 +76,9 @@ class Gwd(object):
         # sort the bidders by using their maximum value linearly and subtracting it from the price
         while amount_to_satisfy > 0:
             best_bidder_info = (0.0, None, None)
-            for bidderInfo in bidder_info_set:
-                budget_diff_info = self._getBudgetDiffInfo(bidderInfo, slots, slots_time_remaining)
+            for bidderid in bidders_satisfiable:
+                bidderInfo = bidderInfos[bidderid]
+                budget_diff_info = cls._getBudgetDiffInfo(bidderInfo, slots, slots_time_remaining)
                 gain = 0.0
                 attrib_needed = bidderInfo.attrib_min
                 for (bdiff, attrib_value, slotid) in budget_diff_info:
@@ -92,13 +94,13 @@ class Gwd(object):
             # if no bidder was found, break
             if bidderInfo is None: break
             # remove the bidderInfo from the list of bidderInfos and subtract amount_to_satisfy
-            bidder_info_set = bidder_info_set-frozenset([bidderInfo])
-            bidders_satisfied.append(bidderInfo)
+            bidders_satisfiable -= frozenset([bidderInfo.id])
+            bidders_satisfied.append(bidderInfo.id)
             amount_to_satisfy -= 1
             # add constraints for the bidder.
             # this has to happen now (and not e.g. by using satisfySelectedBidders) because
             # the slots_time_remaining has to be updated for the next best bidder imeediately
-            cons_bidder, slots_time_used_bidder = self._generateConstraintsForBudget(bidderInfo, budget_diff_info, prob_vars)
+            cons_bidder, slots_time_used_bidder = cls._generateConstraintsForBudget(bidderInfo, budget_diff_info, prob_vars)
             cons_highestbidders.extend(cons_bidder)
             for (slotid, time_used) in slots_time_used_bidder.iteritems():
                 slots_time_remaining[slotid] -= time_used
@@ -106,10 +108,11 @@ class Gwd(object):
         return cons_highestbidders, bidders_satisfied, slots_time_remaining
     
     @classmethod
-    def satisfySelectedBidders(cls, slots, bidderinfos_to_satisfy, slots_time_remaining, prob_vars):
+    def satisfySelectedBidders(cls, slots, bidderInfos, bidders_to_satisfy, slots_time_remaining, prob_vars):
         cons_selectedbidders = []
         slots_time_remaining = slots_time_remaining.copy()
-        for bidderInfo in bidderinfos_to_satisfy:
+        for bidderid in bidders_to_satisfy:
+            bidderInfo = bidderInfos[bidderid]
             budget_diff_info = cls._getBudgetDiffInfo(bidderInfo, slots, slots_time_remaining)
             cons_bidder, slots_time_used_bidder = cls._generateConstraintsForBudget(bidderInfo, budget_diff_info, prob_vars)
             for (slotid, time_used) in slots_time_used_bidder.iteritems():
@@ -158,23 +161,21 @@ class Vcg(object):
         for (step,w) in enumerate(winners):
             bidderinfo_winner = bidderInfos[w]
             bidderinfos_without_w = bidderInfos.copy(); del bidderinfos_without_w[w]
-            bidderinfos_satisfied_without_w = [b for b in bidders_satisfied if b.id != w]
-            revenue_without_w = self._calculate_step(slots, bidderinfo_winner, bidderinfos_without_w, bidderinfos_satisfied_without_w)
+            bidderinfos_satisfied_without_w = [bidderid for bidderid in bidders_satisfied if bidderid != w]
+            revenue_without_w = self._calculate_step(slots, bidderInfos, bidderinfo_winner, bidderinfos_without_w, bidderinfos_satisfied_without_w)
             prices_vcg[w] = bidderinfo_winner.budget - (revenue_raw-revenue_without_w)
-            logging.debug('calculating vcg - step %d of %d' % (step+1,len(winners)))
         revenue_vcg = sum(prices_vcg.itervalues())
         logging.info('vcg:\trevenue %d\tprices: %s' % (revenue_vcg,sorted(prices_vcg.iteritems())))
         return (revenue_vcg,prices_vcg)
     
-    def _calculate_step(self, slots, bidderinfo_winner, bidderinfos_without_w, bidderinfos_satisfied_without_w):
+    def _calculate_step(self, slots, bidderInfos, bidderinfo_winner, bidderinfos_without_w, bidderinfos_satisfied_without_w):
         prob_vcg, prob_vars = self.gwd.generate(slots,bidderinfos_without_w)
         prob_vcg.name = 'vcg_%d' % bidderinfo_winner.id
-        
         if bidderinfos_satisfied_without_w:
-            slots_time_remaining = dict((slot.id,slot.length) for slot in slots)
-            cons_bidders = Gwd.satisfySelectedBidders(slots, bidderinfos_satisfied_without_w, slots_time_remaining, prob_vars)
+            slots_time_remaining = dict((slotid,slot.length) for (slotid,slot) in slots.iteritems())
+            cons_bidders = Gwd.satisfySelectedBidders(slots, bidderInfos, bidderinfos_satisfied_without_w, slots_time_remaining, prob_vars)
             for con in cons_bidders: prob_vcg += con
-            
+        logging.info('vcg:\tcalculating - without winner %s' % (bidderinfo_winner.id,))
         solver_status = prob_vcg.solve(self.gwd.solver)
         assert solver_status == pu.LpStatusOptimal
         
@@ -216,8 +217,9 @@ class CorePricing(object):
             for w in winners:
                 prob_sep += prob_sep.variablesDict()['y_%d' % w] <= t[w]
             # solve it
+            logging.info('sep:\tcalculating - step %s' % (cnt),)
             solver_status = prob_sep.solve(self.gwd.solver)
-            assert solver_status == pu.LpStatusOptimal
+            # assert solver_status == pu.LpStatusOptimal
             # save the value: z( π^t )
             revenue_sep = pu.value(prob_sep.objective)
             # check for a blocking coalition. if no coalition exists, break
@@ -232,6 +234,8 @@ class CorePricing(object):
             # add (iteratively) new constraints to the ebpo problem
             prob_ebpo += sum(pi[wnb] for wnb in winners_nonblocking) >= revenue_sep - sum(prices_t[wb] for wb in winners_blocking)
             # solve the ebpo (this problem can be formulated as a continous LP).
+            prob_ebpo.writeLP('ebpo.lp')
+            logging.info('ebpo:\tcalculating - step %s' % (cnt),)
             solver_status = prob_ebpo.solve(ebpo_solver)
             assert solver_status == pu.LpStatusOptimal
             # updated the π_t list
@@ -244,29 +248,28 @@ class CorePricing(object):
         return (revenue_core, prices_t)
 
 
-def solve(slots, bidderInfos, timeLimit=10, **kw):
+def solve(slots, bidderInfos, timeLimit=5, **kw):
 
-    # vars needed for the heuristic    
-    bidder_info_set = frozenset(bidderInfos)
+    # vars needed for the heuristic
+    bidders_satisfiable = frozenset(bidderInfos.keys())   
     bidders_satisfied = []
     slots_time_remaining = dict((slotid,slot.length) for (slotid,slot) in slots.iteritems())
     
     # generate the gwd    
-    gwd = Gwd(msg=False)
+    gwd = Gwd()
     prob_gwd, prob_vars = gwd.generate(slots, bidderInfos)
     
     # solve the gwd with a time limit to determine whether a heuristic has to be used
     gwd.solver.timeLimit = timeLimit
     amount_to_satisfy = 0
     
-#    solver_status, (revenue_raw, prices_raw, winners) = gwd.solve(prob_gwd, bidderInfos)
-    solver_status = pu.LpStatusNotSolved
+    solver_status, (revenue_raw, prices_raw, winners) = gwd.solve(prob_gwd, bidderInfos)
     while solver_status != pu.LpStatusOptimal:
-        amount_to_satisfy += round(len(bidderInfos)*0.1)
+        amount_to_satisfy += 1
         if amount_to_satisfy >= len(bidderInfos)/2: 
             raise Exception('problem too big to solve')
-        cons_highest, bidders_now_satisfied, slots_time_remaining = gwd.satisfyBestBidders(amount_to_satisfy, slots, bidder_info_set, slots_time_remaining, prob_vars)
-        bidder_info_set -= frozenset(bidders_now_satisfied)
+        cons_highest, bidders_now_satisfied, slots_time_remaining = gwd.satisfyBestBidders(amount_to_satisfy, bidders_satisfiable, slots, bidderInfos, slots_time_remaining, prob_vars)
+        bidders_satisfiable -= frozenset(bidders_now_satisfied)
         bidders_satisfied.extend(bidders_now_satisfied)
         for con in cons_highest: prob_gwd += con
         solver_status, (revenue_raw, prices_raw, winners) = gwd.solve(prob_gwd, bidderInfos)
