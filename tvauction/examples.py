@@ -14,64 +14,67 @@ rand_times = [i*3 for i in rand_times]
 
 def example1():
     '''tests core pricing.'''
-    slots = [Slot(i,1.0,120) for i in range(3)]
-    bidderInfos = [
-        BidderInfo(0,1000,100,1,(1,)*len(slots)),
-        BidderInfo(1,1000,100,1,(1,)*len(slots)),
-        BidderInfo(2,1000,100,1,(1,)*len(slots)),
-        BidderInfo(3,1800,100,3,(1,)*len(slots)),
-    ]
+    slots = dict((i,Slot(i,1.0,120)) for i in range(3))
+    bidderInfos = dict([
+        (0,BidderInfo(0,1000,100,1,dict((i,1) for i in slots.iterkeys()))),
+        (1,BidderInfo(1,1000,100,1,dict((i,1) for i in slots.iterkeys()))),
+        (2,BidderInfo(2,1000,100,1,dict((i,1) for i in slots.iterkeys()))),
+        (3,BidderInfo(3,1800,100,3,dict((i,1) for i in slots.iterkeys()))),
+    ])
     return processor_solve(slots,bidderInfos)
 
 def example2():
     '''tests selective attributes.'''
-    slots = [Slot(i,1.0,120) for i in range(3)]
-    bidderInfos = [
-        BidderInfo(0,1000,100,1,(0,0,1)),
-        BidderInfo(1,1000,100,1,(1,1,0)),
-        BidderInfo(2,1000,100,1,(1,0,0)),
-        BidderInfo(3,1800,100,3,(1,1,2)),
-    ]
+    slots = dict((i,Slot(i,1.0,120)) for i in range(3))
+    bidderInfos = dict([
+        (0,BidderInfo(0,1000,100,1,{0:0,1:0,2:1})),
+        (1,BidderInfo(1,1000,100,1,{0:1,1:1,2:0})),
+        (2,BidderInfo(2,1000,100,1,{0:1,1:0,2:0})),
+        (3,BidderInfo(3,1800,100,3,{0:1,1:1,2:2})),
+    ])
     return processor_solve(slots,bidderInfos)
 
 def example3():
     '''tests for equal bids'''
     slot_amount = 168
     bidder_amount = 30
-    slots = [Slot(i,0,120) for i in range(slot_amount)]
-    bidderInfos = [BidderInfo(i,1000,100,10,(1,)*len(slots)) for i in range(bidder_amount)]
+    slots = dict((i,Slot(i,0,120)) for i in range(slot_amount))
+    bidderInfos = dict(
+        (i,BidderInfo(i,1000,100,10,dict((i,1) for i in slots.iterkeys()))) 
+        for i in range(bidder_amount)
+    )
     return processor_solve(slots,bidderInfos)
 
 def example4():
     '''tests for uncorrelated bids'''
     slot_amount = 168
     bidder_amount = 30
-    slots = [Slot(i,0,120) for i in range(slot_amount)]
-    bidderInfos = [
-        BidderInfo(i,incr*times*length,length,times,(1,)*len(slots)) 
+    slots = dict((i,Slot(i,0,120)) for i in range(slot_amount))
+    bidderInfos = dict(
+        (i,BidderInfo(i,incr*times*length,length,times,dict((i,1) for i in slots.iterkeys())))
         for (i,(incr,length,times)) 
-        in enumerate(zip(rand_increments,rand_lengths,rand_times))
-    ][:bidder_amount]
+        in enumerate(zip(rand_increments,rand_lengths,rand_times)[:bidder_amount])
+    )
     return processor_solve(slots,bidderInfos)
 
 def example5():
     '''tests for semicorrelated bids'''
     slot_amount = 168
     bidder_amount = 40
-    slots = [Slot(i,0,120) for i in range(slot_amount)]
-    bidderInfos = [
-        BidderInfo(i,(2*times*length)+incr,length,times,(1,)*len(slots)) 
+    slots = dict((i,Slot(i,0,120)) for i in range(slot_amount))
+    bidderInfos = dict(
+        (i,BidderInfo(i,(2*times*length)+incr,length,times,dict((i,1) for i in slots.iterkeys())))
         for (i,(incr,length,times)) 
-        in enumerate(zip(rand_increments,rand_lengths,rand_times))
-    ][:bidder_amount]
+        in enumerate(zip(rand_increments,rand_lengths,rand_times)[:bidder_amount])
+    )
     return processor_solve(slots,bidderInfos)
 
 if __name__=='__main__':
     import json
     from pprint import pprint as pp
     logging.basicConfig(level=logging.INFO)
-#    print json.dumps(example1())
-#    print json.dumps(example2())
+    print json.dumps(example1())
+    print json.dumps(example2())
 #    print json.dumps(example3())
 #    print json.dumps(example4())
-    print json.dumps(example5())
+#    print json.dumps(example5())
