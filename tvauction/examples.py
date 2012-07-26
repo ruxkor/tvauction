@@ -44,7 +44,7 @@ def example3():
 
 def example4():
     '''tests for uncorrelated bids'''
-    slot_amount = 168/4
+    slot_amount = 168
     bidder_amount = 30
     slots = [Slot(i,0,120) for i in range(slot_amount)]
     bidderInfos = [
@@ -57,7 +57,7 @@ def example4():
 def example5():
     '''tests for semicorrelated bids'''
     slot_amount = 168
-    bidder_amount = 50
+    bidder_amount = 40
     slots = [Slot(i,0,120) for i in range(slot_amount)]
     bidderInfos = [
         BidderInfo(i,(2*times*length)+incr,length,times,(1,)*len(slots)) 
@@ -70,8 +70,8 @@ if __name__=='__main__':
     import json
     from pprint import pprint as pp
     logging.basicConfig(level=logging.INFO)
-    print json.dumps(example1())
+#    print json.dumps(example1())
 #    print json.dumps(example2())
 #    print json.dumps(example3())
 #    print json.dumps(example4())
-#    print json.dumps(example5())
+    print json.dumps(example5())
