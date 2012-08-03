@@ -1,4 +1,4 @@
-from processor_pulp import Slot, BidderInfo, solve as processor_solve
+from processor_pulp import Slot, BidderInfo, TvAuctionProcessor
 import logging
 
 slot_amount = 168/4
@@ -42,7 +42,7 @@ def example3():
         (i,BidderInfo(i,1000,100,10,dict((i,1) for i in slots.iterkeys()))) 
         for i in range(bidder_amount)
     )
-    return processor_solve(slots,bidderInfos)
+    return TvAuctionProcessor().solve(slots,bidderInfos)
 
 def example4():
     '''tests for uncorrelated bids'''
@@ -54,20 +54,49 @@ def example4():
         for (i,(incr,length,times)) 
         in enumerate(zip(rand_increments,rand_lengths,rand_times)[:bidder_amount])
     )
-    return processor_solve(slots,bidderInfos)
+    return TvAuctionProcessor().solve(slots,bidderInfos)
 
 def example5():
     '''tests for semicorrelated bids'''
     slot_amount = 168
-    bidder_amount = 40
+    bidder_amount = 50
     slots = dict((i,Slot(i,0,120)) for i in range(slot_amount))
     bidderInfos = dict(
         (i,BidderInfo(i,(2*times*length)+incr,length,times,dict((i,1) for i in slots.iterkeys())))
         for (i,(incr,length,times)) 
         in enumerate(zip(rand_increments,rand_lengths,rand_times)[:bidder_amount])
     )
-    return processor_solve(slots,bidderInfos)
+    return TvAuctionProcessor().solve(slots,bidderInfos)
 
+def generate_random_color():
+    import colorsys
+    import random
+    return colorsys.hls_to_rgb(
+        random.random(), 
+        float(random.randint(20,90))/100, 
+        random.random()/2+0.5
+    )
+
+def drawit(save_path,res):
+#    res = {"winners": [1, 2, 35, 6, 33, 8, 10, 39, 15, 16, 17, 18, 20, 22, 23, 7, 25, 27, 30, 31], "prices_core": {"1": 0.0, "2": 3012.0, "35": 806.0, "6": 0.0, "33": 6569.0, "8": 1502.0, "10": 5518.0, "39": 992.0, "15": 0.0, "16": 5148.0, "17": 0.0, "18": 992.0, "20": 652.0, "22": 403.0, "23": 403.0, "7": 1581.0, "25": 3377.0, "27": 2902.0, "30": 6815.0, "31": 992.0}, "prices_vcg": {"1": 0.0, "2": 3012, "35": 806.0, "6": 0.0, "33": 6569, "8": 1502.0, "10": 5518, "39": 806.0, "15": 0.0, "16": 5148.0, "17": 0.0, "18": 652.0, "20": 652.0, "22": 42.0, "23": 42.0, "7": 1220.0, "25": 3377, "27": 2902.0, "30": 6815, "31": 806.0}, "prices_raw": {"1": 1067, "2": 3012, "35": 1438, "6": 918, "33": 6569, "8": 2475, "10": 5518, "39": 1459, "15": 603, "16": 5412, "17": 695, "18": 1178, "20": 2185, "22": 1260, "23": 1387, "7": 1980, "25": 3377, "27": 3318, "30": 6815, "31": 1414}}
+    import matplotlib.pyplot as plt
+    import numpy as np
+    ind = np.array(sorted(res['winners']))
+    width = 0.15
+    
+    fig = plt.figure(None,figsize=(20,6))
+    ax = fig.add_subplot(111)
+    ax.grid(True,axis='y')
+    
+    for nr,ptype in enumerate(['raw','vcg','core']):
+        vals = [v for (k,v) in sorted(res['prices_%s' % ptype].iteritems())]
+        vcol = generate_random_color()
+        ax.bar(ind+(nr*width*1.8), vals, width, color=vcol,alpha=0.8)
+
+    ax.set_xticks(ind+width)
+    ax.set_xticklabels(ind)
+    fig.savefig(save_path)
+    
 if __name__=='__main__':
     import json
     from pprint import pprint as pp
@@ -76,4 +105,6 @@ if __name__=='__main__':
 #    print json.dumps(example2())
 #    print json.dumps(example3())
 #    print json.dumps(example4())
-    print json.dumps(example5())
+    res = example5()
+    drawit('/tmp/example5.pdf',res)
+    print json.dumps(res)
