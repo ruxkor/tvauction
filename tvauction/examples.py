@@ -20,7 +20,7 @@ def example1():
         (2,BidderInfo(2,1000,100,1,dict((i,1) for i in slots.iterkeys()))),
         (3,BidderInfo(3,1800,100,3,dict((i,1) for i in slots.iterkeys()))),
     ])
-    return processor_solve(slots,bidderInfos)
+    return TvAuctionProcessor().solve(slots,bidderInfos)
 
 def example2():
     '''tests selective attributes.'''
@@ -31,7 +31,7 @@ def example2():
         (2,BidderInfo(2,1000,100,1,{0:1,1:0,2:0})),
         (3,BidderInfo(3,1800,100,3,{0:1,1:1,2:2})),
     ])
-    return processor_solve(slots,bidderInfos)
+    return TvAuctionProcessor().solve(slots,bidderInfos)
 
 def example3():
     '''tests for equal bids'''
@@ -82,29 +82,36 @@ def drawit(save_path,res):
     import matplotlib.pyplot as plt
     import numpy as np
     ind = np.array(sorted(res['winners']))
-    width = 0.15
+    width = 0.8
     
     fig = plt.figure(None,figsize=(20,6))
     ax = fig.add_subplot(111)
     ax.grid(True,axis='y')
     
-    for nr,ptype in enumerate(['raw','vcg','core']):
-        vals = [v for (k,v) in sorted(res['prices_%s' % ptype].iteritems())]
-        vcol = generate_random_color()
-        ax.bar(ind+(nr*width*1.8), vals, width, color=vcol,alpha=0.8)
+    bars = []
+    bar_labels = []
+    
+    for (ptype,pcolor) in zip(['raw','vcg','core'],[(0,1,1),(1,0,1),(1,1,0)]):
+        vals = [v for (_k,v) in sorted(res['prices_%s' % ptype].iteritems())]
+#        ax.bar(ind+(nr*width*1.8), vals, width, color=pcolor,alpha=0.3,linewidth=0)
+        bar = ax.bar(ind, vals, width, color=pcolor,alpha=0.5,linewidth=0)
+        bars.append(bar)
+        bar_labels.append(ptype)
 
-    ax.set_xticks(ind+width)
+    ax.set_xticks(ind+0.4)
     ax.set_xticklabels(ind)
+    ax.legend(bars,bar_labels)
     fig.savefig(save_path)
     
-if __name__=='__main__':
+def main():    
     import json
-    from pprint import pprint as pp
     logging.basicConfig(level=logging.INFO)
-#    print json.dumps(example1())
-#    print json.dumps(example2())
-#    print json.dumps(example3())
-#    print json.dumps(example4())
-    res = example5()
-    drawit('/tmp/example5.pdf',res)
-    print json.dumps(res)
+    ex_fns = [example1,example2,example3,example4,example5]
+    ex_names = ['example1','example2','example3','example4','example5']
+    for ex_n,ex_fn in zip(ex_names,ex_fns):
+        res = ex_fn()
+        drawit('/tmp/%s.pdf' % ex_n, res)
+        print json.dumps(res)
+        
+if __name__=='__main__':
+    main()

@@ -253,7 +253,7 @@ class TvAuctionProcessor(object):
     def isOptimal(self,solver_status):
         return solver_status == pu.LpStatusOptimal
     
-    def solve(self, slots, bidderInfos, timeLimit=10, **kw):
+    def solve(self, slots, bidderInfos, timeLimit=15, **kw):
     
         # vars needed for the heuristic
         bidders_satisfiable = frozenset(bidderInfos.keys())   
