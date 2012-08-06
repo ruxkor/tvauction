@@ -59,14 +59,21 @@ def example4():
 def example5():
     '''tests for semicorrelated bids'''
     slot_amount = 168
-    bidder_amount = 50
+    bidder_amount = 38
     slots = dict((i,Slot(i,0,120)) for i in range(slot_amount))
     bidderInfos = dict(
         (i,BidderInfo(i,(2*times*length)+incr,length,times,dict((i,1) for i in slots.iterkeys())))
         for (i,(incr,length,times)) 
         in enumerate(zip(rand_increments,rand_lengths,rand_times)[:bidder_amount])
     )
-    return TvAuctionProcessor().solve(slots,bidderInfos)
+    proc = TvAuctionProcessor()
+#    class VcgMock(object):
+#        def __init__(self,*a,**kw):
+#            pass
+#        def calculate(self,*a,**kw):
+#            return (None, dict([(1, 1000.0), (3, 5340), (6, 503.0), (7, 1980), (8, 2333.0), (13, 2333.0), (15, 353.0), (16, 5412), (17, 643.0), (18, 1000.0), (20, 2185), (21, 1984), (22, 1260), (25, 3377), (26, 3199.0), (27, 3318), (28, 2250), (31, 1000.0), (32, 2898), (33, 6518.0), (35, 1220.0), (36, 1502), (37, 652)]))
+#    proc.vcgClass = VcgMock
+    return proc.solve(slots,bidderInfos)
 
 def generate_random_color():
     import colorsys
@@ -106,8 +113,8 @@ def drawit(save_path,res):
 def main():    
     import json
     logging.basicConfig(level=logging.INFO)
-    ex_fns = [example1,example2,example3,example4,example5]
-    ex_names = ['example1','example2','example3','example4','example5']
+    ex_fns = [example1,example2,example3,example4,example5][-1:]
+    ex_names = ['example1','example2','example3','example4','example5'][-1:]
     for ex_n,ex_fn in zip(ex_names,ex_fns):
         res = ex_fn()
         drawit('/tmp/%s.pdf' % ex_n, res)
