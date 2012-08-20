@@ -1,0 +1,11 @@
+#!/bin/bash
+if [ ! -f "$1" ]; then
+	echo "need file as parameter"
+	exit 1
+fi
+F="$1"
+{ 
+	grep "sep:.*value" "$F" | sed -r 's/^.*sep:.*value: ([^,]*),.*$/\1/'; echo 'e'; 
+	grep "ebpo:.*revenue" "$F" | sed -r 's/^.*ebpo:.*revenue: //'; echo 'e'
+} | gnuplot -p -e "plot '-' using 1 with l, '' using 1 with l;"
+

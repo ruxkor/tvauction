@@ -10,7 +10,7 @@ import random
 
 from pprint import pprint as pp
 
-Slot = namedtuple('Slot', ('id','price','length'))
+Slot = namedtuple('Slot', ('id','price','length','reach'))
 BidderInfo = namedtuple('BidderInfo', ('id','budget','length','attrib_min','attrib_values'))
 
 class Gwd(object):
