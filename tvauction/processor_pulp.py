@@ -134,15 +134,20 @@ class CorePricing(object):
             
             # check for a blocking coalition. if no coalition exists, break 
             blocking_coalition_exists = revenue_sep > sum(prices_t.itervalues())
-            if not blocking_coalition_exists: break
+            if not blocking_coalition_exists: 
+                logging.info('sep:\tvalue: %d, blocking: None' % revenue_sep)
+                break
             
-            # if the z(π^t) did not change between iterations, we are in a local optimum we cannot escape
-            if revenue_sep == revenue_last_sep: break
-            else: revenue_last_sep = revenue_sep
-            
-            # extend and solve the ebpo problem:
+            # get the blocking coalition
             blocking_coalition = frozenset(int(b.name[2:]) for b in prob_sep.variables() if b.varValue==1 and b.name[:1]=='y')
             logging.info('sep:\tvalue: %d, blocking: %s' % (revenue_sep, sorted(blocking_coalition),))
+
+            # if the z(π^t) did not change between iterations, we are in a local optimum we cannot escape
+            if revenue_sep == revenue_last_sep:
+                logging.info('sep:\tvalue did not change. aborting.') 
+                break
+            else: 
+                revenue_last_sep = revenue_sep
             
             winners_nonblocking = winners-blocking_coalition
             winners_blocking = winners&blocking_coalition
@@ -162,53 +167,62 @@ class CorePricing(object):
             
             # update the π_t list. π_t has to be equal or increase for each t
             prices_t = dict(
-#                (int(b.name[3:]), max(b.varValue,prices_t[int(b.name[3:])])) 
-                (int(b.name[3:]), b.varValue) 
-                for b in prob_ebpo.variables() 
-                if b.name[:2]=='pi'
+                (int(b.name[3:]), b.varValue) for b in prob_ebpo.variables() if b.name[:2]=='pi'
             )
             logging.info('ebpo:\trevenue: %d' % (sum(prices_t.itervalues()),))
         else:
             raise Exception('too many iterations in core calculation')
         # there is no blocking coalition -> the current iteration of the ebpo contains core prices
         revenue_core = sum(prices_t.itervalues())
-        logging.info('core:\trevenue %d\tprices: %s' % (revenue_core,prices_t.items()))
+        logging.info('core:\trevenue %d\tprices: %s' % (revenue_core,[(k,round(v)) for (k,v) in prices_t.iteritems()]))
         return (revenue_core, prices_t)
 
 class TvAuctionProcessor(object):
     def __init__(self):
         self.gwdClass = Gwd
         self.vcgClass = Vcg
+        self.reservePriceClass = ReservePrice
         self.coreClass = CorePricing
+        
     def isOptimal(self,solver_status):
         return solver_status == pu.LpStatusOptimal
     
-    def solve(self, slots, bidderInfos, timeLimit=15, **kw):
+    def solve(self, slots, bidderInfos, timeLimit=20, epgap=0.02):
     
         # vars needed for the heuristic
-        bidders_satisfied = []
-        
         # generate the gwd    
         gwd = self.gwdClass()
-        prob_gwd, _prob_vars = gwd.generate(slots, bidderInfos)
+        prob_gwd, prob_vars = gwd.generate(slots, bidderInfos)
         
         # solve the gwd with a time limit to determine whether a heuristic has to be used
         gwd.solver.timeLimit = timeLimit
-        gwd.solver.epgap = 0.02
+        gwd.solver.epgap = epgap
         
         _solver_status, (revenue_raw, prices_raw, winners) = gwd.solve(prob_gwd, bidderInfos)
 
         # solve vcg
         vcg = self.vcgClass(gwd)
-        _revenue_vcg, prices_vcg = vcg.calculate(slots, bidderInfos, revenue_raw, winners, bidders_satisfied)
+        _revenue_vcg, prices_vcg = vcg.solve(slots, bidderInfos, revenue_raw, winners, prob_gwd, prob_vars)
         
+        # solve core price
         core = self.coreClass(gwd)
         _revenue_core, prices_core = core.solve(prob_gwd, bidderInfos, winners, prices_raw, prices_vcg)
+        
+        # check for reserve price
+        reservePrice = ReservePrice()
+        _revenue_after, prices_after = reservePrice.solve(slots, bidderInfos, winners, prices_core, prob_vars)
+        
+        x, _y, _cons = prob_vars
+        slot_winners = {}
+        for slot_id,slot_winner_vars in x.iteritems():
+            slot_winners[slot_id] = [user_id for (user_id,has_won) in slot_winner_vars.iteritems() if round(has_won.value()) == 1]
         return {
             'winners': list(winners),
+            'slot_winners': slot_winners,
             'prices_raw': prices_raw,
             'prices_vcg': prices_vcg,
-            'prices_core': prices_core
+            'prices_core': prices_core,
+            'prices_final': prices_after
         }
      
 if __name__ == '__main__':
