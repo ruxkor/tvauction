@@ -64,36 +64,56 @@ class Gwd(object):
         logging.info('raw:\trevenue %d\tprices: %s' % (revenue_raw,sorted(prices_raw.iteritems())))
         return (solver_status,(revenue_raw, prices_raw, winners))
     
-        
+class ReservePrice(object):
+    '''checks if all winners have to pay at least the reserve price.
+    if this is not the case, their price is changed accordingly'''
+    def solve(self, slots, bidderInfos, winners, prices_before, prob_vars):
+        prices_after = {}
+        x, _y, _cons = prob_vars
+        for w in winners:
+            bidderInfo = bidderInfos[w]
+            slot_ids_won = (slot_id for (slot_id,slot_winner_vars) in x.iteritems() if round(slot_winner_vars[w].value()) == 1)
+            price_reserve = sum(
+                slots[slot_id_won].price*bidderInfo.length
+                for slot_id_won in slot_ids_won 
+            )
+            prices_after[w] = max(price_reserve, prices_before[w])
+        revenue_after = sum(prices_after.itervalues())
+        return (revenue_after,prices_after)
+    
 class Vcg(object):
     def __init__(self, gwd):
         self.gwd = gwd
-        pass
-    def calculate(self, slots, bidderInfos, revenue_raw, winners, bidders_satisfied):
+    
+    def solve(self, slots, bidderInfos, revenue_raw, winners, prob_gwd, prob_vars):
         logging.info('vcg:\tcalculating...')
         prices_vcg = {}
+        prob_vcg = prob_gwd.deepcopy()
         for w in winners:
             bidderinfo_winner = bidderInfos[w]
-            bidderinfos_without_w = bidderInfos.copy(); del bidderinfos_without_w[w]
-            revenue_without_w = self._calculate_step(slots, bidderInfos, bidderinfo_winner, bidderinfos_without_w)
-            prices_vcg[w] = bidderinfo_winner.budget - max(0,(revenue_raw-revenue_without_w))
+            revenue_without_w = self._solve_step(prob_vcg, prob_vars, w)
+            prices_vcg[w] = max(0, bidderinfo_winner.budget - max(0,(revenue_raw-revenue_without_w)))
         revenue_vcg = sum(prices_vcg.itervalues())
         logging.info('vcg:\trevenue %d\tprices: %s' % (revenue_vcg,sorted(prices_vcg.iteritems())))
         return (revenue_vcg,prices_vcg)
     
-    def _calculate_step(self, slots, bidderInfos, bidderinfo_winner, bidderinfos_without_w):
-        prob_vcg, _prob_vars = self.gwd.generate(slots,bidderinfos_without_w)
-        prob_vcg.name = 'vcg_%d' % bidderinfo_winner.id
-        logging.info('vcg:\tcalculating - without winner %s' % (bidderinfo_winner.id,))
-        solver_status = prob_vcg.solve(self.gwd.solver)
-        assert solver_status == pu.LpStatusOptimal
+    def _solve_step(self, prob_vcg, prob_vars, winner_id):
+        '''takes the original gwd problem, and forces a winner to loose. used in vcg calculation'''
+        _x, y, _cons = prob_vars
+        
+        logging.info('vcg:\tcalculating - without winner %s' % (winner_id,))
+        prob_vcg.name = 'vcg_%d' % winner_id
+        prob_vcg.addConstraint(y[winner_id] == 0, 'vcg_%d' % winner_id)
+        
+        _solver_status = prob_vcg.solve(self.gwd.solver)
+        del prob_vcg.constraints['vcg_%d' % winner_id]
         
         revenue_without_w = pu.value(prob_vcg.objective)
         return revenue_without_w
         
 class CorePricing(object):
     def __init__(self, gwd):
-        self.gwd = gwd 
+        self.gwd = gwd
     
     def solve(self, prob_gwd, bidderInfos, winners, prices_raw, prices_vcg):
         # build ebpo
