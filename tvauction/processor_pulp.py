@@ -98,7 +98,7 @@ class Vcg(object):
         return (revenue_vcg,prices_vcg)
     
     def _solve_step(self, prob_vcg, prob_vars, winner_id):
-        '''takes the original gwd problem, and forces a winner to loose. used in vcg calculation'''
+        '''takes the original gwd problem, and forces a winner to lose. used in vcg calculation'''
         _x, y, _cons = prob_vars
         
         logging.info('vcg:\tcalculating - without winner %s' % (winner_id,))
@@ -137,7 +137,7 @@ class CorePricing(object):
         for cnt in xrange(1000):
             # make a copy of prob_gwd, since we are using it as basis
             prob_sep = prob_gwd.deepcopy()
-            prob_sep.name = 'sep'
+            prob_sep.name = 'sep_%d' % cnt
             # build sep t variable
             t = dict((w,pu.LpVariable('t_%d' % (w,), cat=pu.LpBinary)) for w in winners)
             # add the 'maximum coalition contribution' to the objective fn
@@ -166,7 +166,7 @@ class CorePricing(object):
             if revenue_sep == revenue_last_sep:
                 logging.info('sep:\tvalue did not change. aborting.') 
                 break
-            else: 
+            else:
                 revenue_last_sep = revenue_sep
             
             winners_nonblocking = winners-blocking_coalition
@@ -186,10 +186,8 @@ class CorePricing(object):
             assert solver_status == pu.LpStatusOptimal
             
             # update the π_t list. π_t has to be equal or increase for each t
-            prices_t = dict(
-                (int(b.name[3:]), b.varValue) for b in prob_ebpo.variables() if b.name[:2]=='pi'
-            )
-            logging.info('ebpo:\trevenue: %d' % (sum(prices_t.itervalues()),))
+            prices_t = dict((int(b.name[3:]), b.varValue) for b in prob_ebpo.variables() if b.name[:2]=='pi')
+            logging.info('ebpo:\trevenue: %d' % sum(prices_t.itervalues()))
         else:
             raise Exception('too many iterations in core calculation')
         # there is no blocking coalition -> the current iteration of the ebpo contains core prices
@@ -207,7 +205,7 @@ class TvAuctionProcessor(object):
     def isOptimal(self,solver_status):
         return solver_status == pu.LpStatusOptimal
     
-    def solve(self, slots, bidderInfos, timeLimit=20, epgap=0.02):
+    def solve(self, slots, bidderInfos, timeLimit=600, epgap=0.01):
     
         # vars needed for the heuristic
         # generate the gwd    
@@ -215,12 +213,13 @@ class TvAuctionProcessor(object):
         prob_gwd, prob_vars = gwd.generate(slots, bidderInfos)
         
         # solve the gwd with a time limit to determine whether a heuristic has to be used
-        gwd.solver.timeLimit = timeLimit
-        gwd.solver.epgap = epgap
+        if timeLimit is not None: gwd.solver.timeLimit = timeLimit
+        if epgap is not None: gwd.solver.epgap = epgap
         
         _solver_status, (revenue_raw, prices_raw, winners) = gwd.solve(prob_gwd, bidderInfos)
 
         # solve vcg
+        if timeLimit is not None: gwd.solver.timeLimit = timeLimit / 2
         vcg = self.vcgClass(gwd)
         _revenue_vcg, prices_vcg = vcg.solve(slots, bidderInfos, revenue_raw, winners, prob_gwd, prob_vars)
         
@@ -229,7 +228,7 @@ class TvAuctionProcessor(object):
         _revenue_core, prices_core = core.solve(prob_gwd, bidderInfos, winners, prices_raw, prices_vcg)
         
         # check for reserve price
-        reservePrice = ReservePrice()
+        reservePrice = self.reservePriceClass()
         _revenue_after, prices_after = reservePrice.solve(slots, bidderInfos, winners, prices_core, prob_vars)
         
         x, _y, _cons = prob_vars
