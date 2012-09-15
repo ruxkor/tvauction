@@ -10,12 +10,14 @@ import random
 
 from pprint import pprint as pp
 
-Slot = namedtuple('Slot', ('id','price','length','reach'))
+SOLVER_MSG = False
+
+Slot = namedtuple('Slot', ('id','price','length'))
 BidderInfo = namedtuple('BidderInfo', ('id','budget','length','attrib_min','attrib_values'))
 
 class Gwd(object):
     def __init__(self):
-        self.solver = pu.GUROBI(msg=False)
+        self.solver = pu.GUROBI(msg=SOLVER_MSG)
         self.prob = None
         
     def generate(self, slots, bidderInfos):
@@ -52,11 +54,13 @@ class Gwd(object):
         for con in cons: prob += con
         return (prob, (x,y,cons))
     
-    def solve(self, prob, bidderInfos):
+    def solve(self, prob, bidderInfos, prob_vars):
         logging.info('wdp:\tcalculating...')
         
         solver_status = prob.solve(self.solver)
-        winners = frozenset(int(v.name[2:]) for v in prob.variables() if v.varValue==1 and v.name[:1]=='y')
+        _x, y, _cons = prob_vars
+        logging.info('wdp:\tstatus: %s' % pu.LpStatus[solver_status])
+        winners = frozenset(j for (j,y_j) in y.iteritems() if y_j.varValue==1)
         
         revenue_raw = pu.value(prob.objective)
         prices_raw = dict((w,bidderInfos[w].budget) for w in winners)
@@ -80,7 +84,14 @@ class ReservePrice(object):
             prices_after[w] = max(price_reserve, prices_before[w])
         revenue_after = sum(prices_after.itervalues())
         return (revenue_after,prices_after)
-    
+
+class VcgFake(object):
+    def __init__(self, gwd):
+        self.gwd = gwd
+    def solve(self, slots, bidderInfos, revenue_raw, winners, prob_gwd, prob_vars):
+        prices_zero = dict((w,0) for w in winners)
+        return (0, prices_zero)
+
 class Vcg(object):
     def __init__(self, gwd):
         self.gwd = gwd
@@ -105,7 +116,8 @@ class Vcg(object):
         prob_vcg.name = 'vcg_%d' % winner_id
         prob_vcg.addConstraint(y[winner_id] == 0, 'vcg_%d' % winner_id)
         
-        _solver_status = prob_vcg.solve(self.gwd.solver)
+        solver_status = prob_vcg.solve(self.gwd.solver)
+        logging.info('vcg:\tstatus: %s' % pu.LpStatus[solver_status])
         del prob_vcg.constraints['vcg_%d' % winner_id]
         
         revenue_without_w = pu.value(prob_vcg.objective)
@@ -118,21 +130,27 @@ class CorePricing(object):
     def solve(self, prob_gwd, bidderInfos, winners, prices_raw, prices_vcg):
         # build ebpo
         prob_ebpo = pu.LpProblem('ebpo',pu.LpMinimize)
-        prices_t = prices_vcg.copy()     
+        prices_t = prices_vcg.copy()
+        
         # variables: π_j, m
         pi = dict((w,pu.LpVariable('pi_%d' % (w,), cat=pu.LpContinuous, lowBound=prices_vcg[w], upBound=prices_raw[w])) for w in winners)
         m = pu.LpVariable('m',cat=pu.LpContinuous)
+        
         # constants: ε (should be 'small enough')
-        epsilon = max(1,sum(prices_vcg)-1)
+        epsilon = 1
+        
         # ebpo objective function
         prob_ebpo += sum(pi.itervalues()) + epsilon*m
+        
         # ebpo constraint: π_j - m <= π_j^vcg 
         for w in winners:
             prob_ebpo += pi[w]-m <= prices_vcg[w]
-        ebpo_solver = pu.GUROBI(msg=False, mip=False)
+        ebpo_solver = pu.GUROBI(msg=SOLVER_MSG, mip=False)
         
-        # initialize revenue_sep
-        revenue_last_sep = 0
+        # initialize revenue_sep and prices_t_sum vars, used for comparisons
+        revenue_sep = revenue_sep_last = 0
+        prices_t_sum = prices_t_sum_last = sum(prices_t.itervalues())
+        
         # abort after 1000 iterations (this should never happen)
         for cnt in xrange(1000):
             # make a copy of prob_gwd, since we are using it as basis
@@ -148,27 +166,21 @@ class CorePricing(object):
             # solve it
             logging.info('sep:\tcalculating - step %d' % cnt)
             solver_status = prob_sep.solve(self.gwd.solver)
-            # assert solver_status == pu.LpStatusOptimal
-            # save the value: z( π^t )
-            revenue_sep = pu.value(prob_sep.objective)
+            logging.info('sep:\tstatus: %s' % pu.LpStatus[solver_status])
+            
+            # save the value: z(π^t)
+            revenue_sep, revenue_sep_last = pu.value(prob_sep.objective), revenue_sep
             
             # check for a blocking coalition. if no coalition exists, break 
             blocking_coalition_exists = revenue_sep > sum(prices_t.itervalues())
             if not blocking_coalition_exists: 
                 logging.info('sep:\tvalue: %d, blocking: None' % revenue_sep)
                 break
-            
+
             # get the blocking coalition
             blocking_coalition = frozenset(int(b.name[2:]) for b in prob_sep.variables() if b.varValue==1 and b.name[:1]=='y')
             logging.info('sep:\tvalue: %d, blocking: %s' % (revenue_sep, sorted(blocking_coalition),))
 
-            # if the z(π^t) did not change between iterations, we are in a local optimum we cannot escape
-            if revenue_sep == revenue_last_sep:
-                logging.info('sep:\tvalue did not change. aborting.') 
-                break
-            else:
-                revenue_last_sep = revenue_sep
-            
             winners_nonblocking = winners-blocking_coalition
             winners_blocking = winners&blocking_coalition
             
@@ -185,11 +197,19 @@ class CorePricing(object):
             solver_status = prob_ebpo.solve(ebpo_solver)
             assert solver_status == pu.LpStatusOptimal
             
-            # update the π_t list. π_t has to be equal or increase for each t
+            # update the π_t list. sum(π_t) has to be equal or increase for each t
             prices_t = dict((int(b.name[3:]), b.varValue) for b in prob_ebpo.variables() if b.name[:2]=='pi')
-            logging.info('ebpo:\trevenue: %d' % sum(prices_t.itervalues()))
+            prices_t_sum, prices_t_sum_last = sum(prices_t.itervalues()), prices_t_sum
+            logging.info('ebpo:\trevenue: %d' % prices_t_sum)
+
+            # if both z(π^t) == z(π^t-1) and θ^t == θ^t-1, we are in a local optimum we cannot escape
+            # proposition: this happens when the gwd returned a suboptimal solution, causing a winner allocation.
+            if revenue_sep == revenue_sep_last and prices_t_sum == prices_t_sum_last:
+                logging.warn('core:\tvalue did not change. aborting.') 
+                break
         else:
-            raise Exception('too many iterations in core calculation')
+            logging.warn('core:\ttoo many iterations in core calculation. aborting.')
+            
         # there is no blocking coalition -> the current iteration of the ebpo contains core prices
         revenue_core = sum(prices_t.itervalues())
         logging.info('core:\trevenue %d\tprices: %s' % (revenue_core,[(k,round(v)) for (k,v) in prices_t.iteritems()]))
@@ -205,36 +225,46 @@ class TvAuctionProcessor(object):
     def isOptimal(self,solver_status):
         return solver_status == pu.LpStatusOptimal
     
-    def solve(self, slots, bidderInfos, timeLimit=600, epgap=0.01):
-    
-        # vars needed for the heuristic
+    def solve(self, slots, bidderInfos, timeLimit=20, epgap=0.02):
+        '''solve the wdp and pricing problem.
+        
+        @param slots:       a dict of Slot objects
+        @param bidderInfos: a dict of BidderInfo objects
+        @param timeLimit:   int|null, if int, then the time will be doubled for the gwd. is used for all integer problems.
+        @param epgap:       float|null, if int, is used for all integer problems.'''
+        
         # generate the gwd    
         gwd = self.gwdClass()
         prob_gwd, prob_vars = gwd.generate(slots, bidderInfos)
         
-        # solve the gwd with a time limit to determine whether a heuristic has to be used
-        if timeLimit is not None: gwd.solver.timeLimit = timeLimit
+        # add a gap and timelimit if set.
+        # we double the timelimit for the gwd.
+        if timeLimit is not None: gwd.solver.timeLimit = timeLimit * 2
         if epgap is not None: gwd.solver.epgap = epgap
         
-        _solver_status, (revenue_raw, prices_raw, winners) = gwd.solve(prob_gwd, bidderInfos)
-
-        # solve vcg
-        if timeLimit is not None: gwd.solver.timeLimit = timeLimit / 2
-        vcg = self.vcgClass(gwd)
-        _revenue_vcg, prices_vcg = vcg.solve(slots, bidderInfos, revenue_raw, winners, prob_gwd, prob_vars)
+        _solver_status, (revenue_raw, prices_raw, winners) = gwd.solve(prob_gwd, bidderInfos, prob_vars)
         
-        # solve core price
-        core = self.coreClass(gwd)
-        _revenue_core, prices_core = core.solve(prob_gwd, bidderInfos, winners, prices_raw, prices_vcg)
-        
-        # check for reserve price
-        reservePrice = self.reservePriceClass()
-        _revenue_after, prices_after = reservePrice.solve(slots, bidderInfos, winners, prices_core, prob_vars)
-        
+        # get the slots for the winners
         x, _y, _cons = prob_vars
         slot_winners = {}
         for slot_id,slot_winner_vars in x.iteritems():
             slot_winners[slot_id] = [user_id for (user_id,has_won) in slot_winner_vars.iteritems() if round(has_won.value()) == 1]
+
+        # if timelimit was set: adjust it
+        if timeLimit is not None: gwd.solver.timeLimit = timeLimit
+        
+        # solve vcg
+        vcg = self.vcgClass(gwd)
+        _revenue_vcg, prices_vcg = vcg.solve(slots, bidderInfos, revenue_raw, winners, prob_gwd, prob_vars)
+
+        # solve core pricing problem
+        core = self.coreClass(gwd)
+        _revenue_core, prices_core = core.solve(prob_gwd, bidderInfos, winners, prices_raw, prices_vcg)
+        
+        # raise prices to the reserve price if needed
+        reservePrice = self.reservePriceClass()
+        _revenue_after, prices_after = reservePrice.solve(slots, bidderInfos, winners, prices_core, prob_vars)
+        
         return {
             'winners': list(winners),
             'slot_winners': slot_winners,
@@ -252,14 +282,23 @@ if __name__ == '__main__':
     parser.add_option('-s','--scenario', dest='scenario', help='the scenario')
     options = parser.parse_args()[0]
     numeric_level = getattr(logging, options.loglevel.upper(), None)
+    
     if not isinstance(numeric_level, int):
         raise ValueError('Invalid log level: %s' % options.loglevel)
     if not options.scenario:
-        raise ValueError('Scenario needed')
+        options.scenario = '[{"1":{"id":1,"price":1.0,"length":120}},{"1":{"id":1,"budget":100,"length":20,"attrib_min":1,"attrib_values":{"1":1}},"2":{"id":2,"budget":100,"length":10,"attrib_min":1,"attrib_values":{"1":1}}}]'
+#        raise ValueError('Scenario needed')
     
     logging.basicConfig(level=numeric_level)
     
-    slots, bidderInfos = json.loads(options.scenario)
-    res = TvAuctionProcessor.solve(slots, bidderInfos)
-    
+    slots_imported, bidderInfos_imported = json.loads(options.scenario)
+    slots = dict( (s['id'],Slot(**s)) for s in slots_imported.itervalues() )
+    bidderInfos = dict( (b['id'],BidderInfo(**b)) for b in bidderInfos_imported.itervalues() )
+    for bidderInfo in bidderInfos.itervalues():
+        attrib_values = bidderInfo.attrib_values
+        for av in attrib_values.keys():
+            attrib_values[int(av)] = attrib_values.pop(av)
+    proc = TvAuctionProcessor()
+    res = proc.solve(slots, bidderInfos)
+
     print json.dumps(res,indent=2)    
