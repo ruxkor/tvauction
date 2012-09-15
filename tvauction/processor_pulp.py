@@ -71,16 +71,11 @@ class Gwd(object):
 class ReservePrice(object):
     '''checks if all winners have to pay at least the reserve price.
     if this is not the case, their price is changed accordingly'''
-    def solve(self, slots, bidderInfos, winners, prices_before, prob_vars):
+    def solve(self, slots, bidderInfos, winners_slots, prices_before):
         prices_after = {}
-        x, _y, _cons = prob_vars
-        for w in winners:
+        for w,slot_ids_won in winners_slots.iteritems():
             bidderInfo = bidderInfos[w]
-            slot_ids_won = (slot_id for (slot_id,slot_winner_vars) in x.iteritems() if round(slot_winner_vars[w].value()) == 1)
-            price_reserve = sum(
-                slots[slot_id_won].price*bidderInfo.length
-                for slot_id_won in slot_ids_won 
-            )
+            price_reserve = sum(slots[slot_id].price for slot_id in slot_ids_won)*bidderInfo.length
             prices_after[w] = max(price_reserve, prices_before[w])
         revenue_after = sum(prices_after.itervalues())
         return (revenue_after,prices_after)
@@ -212,7 +207,7 @@ class CorePricing(object):
             
         # there is no blocking coalition -> the current iteration of the ebpo contains core prices
         revenue_core = sum(prices_t.itervalues())
-        logging.info('core:\trevenue %d\tprices: %s' % (revenue_core,[(k,round(v)) for (k,v) in prices_t.iteritems()]))
+        logging.info('core:\trevenue %d\tprices: %s' % (revenue_core,[(k,round(v,2)) for (k,v) in prices_t.iteritems()]))
         return (revenue_core, prices_t)
 
 class TvAuctionProcessor(object):
@@ -246,9 +241,13 @@ class TvAuctionProcessor(object):
         
         # get the slots for the winners
         x, _y, _cons = prob_vars
-        slot_winners = {}
-        for slot_id,slot_winner_vars in x.iteritems():
-            slot_winners[slot_id] = [user_id for (user_id,has_won) in slot_winner_vars.iteritems() if round(has_won.value()) == 1]
+        slots_winners = {}
+        winners_slots = dict((w,[]) for w in winners)
+        print winners_slots
+        for slot_id, slot_user_vars in x.iteritems():
+            slot_winners = [user_id for (user_id,has_won) in slot_user_vars.iteritems() if round(has_won.value()) == 1]
+            for slot_winner in slot_winners: winners_slots[slot_winner].append(slot_id)
+            slots_winners[slot_id] = slot_winners
 
         # if timelimit was set: adjust it
         if timeLimit is not None: gwd.solver.timeLimit = timeLimit
@@ -263,11 +262,11 @@ class TvAuctionProcessor(object):
         
         # raise prices to the reserve price if needed
         reservePrice = self.reservePriceClass()
-        _revenue_after, prices_after = reservePrice.solve(slots, bidderInfos, winners, prices_core, prob_vars)
+        _revenue_after, prices_after = reservePrice.solve(slots, bidderInfos, winners_slots, prices_core)
         
         return {
             'winners': list(winners),
-            'slot_winners': slot_winners,
+            'slots_winners': slots_winners,
             'prices_raw': prices_raw,
             'prices_vcg': prices_vcg,
             'prices_core': prices_core,
