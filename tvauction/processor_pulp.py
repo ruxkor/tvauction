@@ -175,7 +175,10 @@ class CorePricing(object):
             # get the blocking coalition
             blocking_coalition = frozenset(int(b.name[2:]) for b in prob_sep.variables() if b.varValue==1 and b.name[:1]=='y')
             logging.info('sep:\tvalue: %d, blocking: %s' % (revenue_sep, sorted(blocking_coalition),))
-
+            
+            revenue_blocking_coalition = sum(b.budget for (b_id,b) in bidderInfos.iteritems() if b_id in blocking_coalition)
+            logging.info('sep:\tvalue_blocking_coalition: %d, bigger: %s' % (revenue_blocking_coalition, revenue_blocking_coalition > sum(prices_raw.itervalues())))
+            
             winners_nonblocking = winners-blocking_coalition
             winners_blocking = winners&blocking_coalition
             
@@ -243,7 +246,6 @@ class TvAuctionProcessor(object):
         x, _y, _cons = prob_vars
         slots_winners = {}
         winners_slots = dict((w,[]) for w in winners)
-        print winners_slots
         for slot_id, slot_user_vars in x.iteritems():
             slot_winners = [user_id for (user_id,has_won) in slot_user_vars.iteritems() if round(has_won.value()) == 1]
             for slot_winner in slot_winners: winners_slots[slot_winner].append(slot_id)
