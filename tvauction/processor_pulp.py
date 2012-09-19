@@ -135,6 +135,13 @@ class Vcg(object):
     
     def getPriceForBidder(self, budget, revenue_raw, revenue_without_bidder):
         return max(0, budget - max(0, (revenue_raw-revenue_without_bidder)))
+    
+    def getPricesForBidders(self, bidderInfos, revenue_raw, revenues_without_bidders):
+        return dict(
+            (w, self.vcg.getPriceForBidder(bidderInfos[w].budget, revenue_raw, revenue_without_w))
+            for (w,revenue_without_w) in revenues_without_bidders.iteritems()
+        )
+        
         
 class CorePricing(object):
     
@@ -156,10 +163,7 @@ class CorePricing(object):
         winners_slots = None
         
         revenue_raw = sum(prices_raw.itervalues())
-        prices_vcg = dict(
-            (w, self.vcg.getPriceForBidder(bidderInfos[w].budget, revenue_raw, revenue_without_w))
-            for (w,revenue_without_w) in revenues_without_bidders.iteritems()
-        )
+        prices_vcg = self.vcg.getPricesForBidders(bidderInfos, revenue_raw, revenues_without_bidders)
         
         # build ebpo
         prob_ebpo = pu.LpProblem('ebpo',pu.LpMinimize)
@@ -241,21 +245,16 @@ class CorePricing(object):
                 )
                 
                 # update prices_vcg using the (new) revenue
-                prices_vcg = dict(
-                    (w, self.vcg.getPriceForBidder(bidderInfos[w].budget, revenue_raw, revenue_without_w))
-                    for (w,revenue_without_w) in revenues_without_bidders.iteritems()
-                )
+                prices_vcg = self.vcg.getPricesForBidders(bidderInfos, revenue_raw, revenues_without_bidders)
                 
                 # update prices_t
                 prices_t = prices_vcg.copy()
                 
-                # recreate the ebpo and its variables if needed
-                pi = dict((w,pu.LpVariable('pi_%d' % (w,), cat=pu.LpContinuous, lowBound=prices_vcg[w], upBound=blocking_coalition_with_revenue[w])) for w in blocking_coalition)
+                # recreate the ebpo
                 prob_ebpo = pu.LpProblem('ebpo',pu.LpMinimize)
+                pi = dict((w,pu.LpVariable('pi_%d' % (w,), cat=pu.LpContinuous, lowBound=prices_vcg[w], upBound=blocking_coalition_with_revenue[w])) for w in blocking_coalition)
 
-                for w in blocking_coalition:
-                    prob_ebpo += (pi[w]-m <= prices_vcg[w], 'pi_constr_%d' % w)
-                    
+                for w in blocking_coalition: prob_ebpo += (pi[w]-m <= prices_vcg[w], 'pi_constr_%d' % w)
                 prob_ebpo += sum(pi.itervalues()) + epsilon*m
 
                 # start a new round for the sep (since we recreated the prices_t vector with the vcg values)
