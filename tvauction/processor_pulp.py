@@ -87,6 +87,10 @@ class ReservePrice(object):
         revenue_after = sum(prices_after.itervalues())
         return (revenue_after,prices_after)
 
+#
+# TODO: use the epgap to raise the revenue_without_bidder (so vcg price gets lower)
+# if not, we risk too high vcg prices which could cause infeasibilities!
+#
 class VcgFake(object):
     def __init__(self, gwd):
         self.gwd = gwd
