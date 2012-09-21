@@ -13,4 +13,4 @@ RAWVALS=$(echo "$SEPVALS" | sed "s/^.*$/$RAWVAL/")
 	echo "$SEPVALS"; echo 'e';
 	grep "ebpo:[[:space:]]*revenue:" "$F" | sed -r 's/^.*ebpo:[[:space:]]*revenue: //'; echo 'e';
 	grep "sep:[[:space:]]*value_blocking_coalition:" "$F" | sed -r 's/^.*sep:[[:space:]]*value_blocking_coalition: ([^,]*),.*$/\1/'; echo 'e' 
-} | gnuplot -p -e "set grid;$DUMB plot '-' using 1 with lp, '' using 1 with lp, '' using 1 with lp, '' using 1 with lp;"
+} | gnuplot -p -e "set grid;$DUMB plot '-' using 1 with l, '' using 1 with l, '' using 1 with l, '' using 1 with l;"

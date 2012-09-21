@@ -3,6 +3,7 @@ import logging
 
 import math
 import processor_pulp
+import datetime
 
 slot_amount = 168/4
 bidder_amount = 50/2
@@ -49,7 +50,7 @@ def example3():
 
 def example4():
     '''tests for uncorrelated bids'''
-    slot_amount = 168
+    slot_amount = 168/4
     bidder_amount = 30
     slots = dict((i,Slot(i,0,120)) for i in range(slot_amount))
     bidderInfos = dict(
@@ -57,20 +58,39 @@ def example4():
         for (i,(incr,length,times)) 
         in enumerate(zip(rand_increments,rand_lengths,rand_times)[:bidder_amount])
     )
-    return TvAuctionProcessor().solve(slots,bidderInfos)
+    proc = TvAuctionProcessor()
+    proc.vcgClass = processor_pulp.VcgFake
+    return proc.solve(slots,bidderInfos,5,1)
 
 def example5():
     '''tests for semicorrelated bids'''
-    slot_amount = 168
-    bidder_amount = 38
-    slots = dict((i,Slot(i,0,120,1)) for i in range(slot_amount))
+    slot_amount = 168/2
+    bidder_amount = 30
+    slots = dict((i,Slot(i,0,120)) for i in range(slot_amount))
     bidderInfos = dict(
-        (i,BidderInfo(i,(2*times*length)+incr,length,times,dict((i,1) for i in slots.iterkeys())))
+        (i,BidderInfo(i,(2*times*length)+incr,length,times,dict((i,1) for i in slots)))
         for (i,(incr,length,times)) 
         in enumerate(zip(rand_increments,rand_lengths,rand_times)[:bidder_amount])
     )
     proc = TvAuctionProcessor()
-    return proc.solve(slots,bidderInfos)
+    proc.vcgClass = processor_pulp.VcgFake
+#    return proc.solve(slots,bidderInfos,None,None)
+    return proc.solve(slots,bidderInfos,5,2)
+
+def exampleVcg():
+    slot_amount = 3
+    slots = dict((i,Slot(i,0,120)) for i in range(slot_amount))
+    bidderInfos = {
+        0: BidderInfo(0,1000,100,1,{0:1,1:1,2:1}),
+        1: BidderInfo(1,1000,100,1,{0:1,1:1,2:1}),
+        2: BidderInfo(2,1000,100,1,{0:1,1:1,2:1}),
+        3: BidderInfo(3,1800,100,3,{0:1,1:1,2:1}),
+        4: BidderInfo(3,1900,100,2,{0:1,1:1,2:1}),
+    }
+    proc = TvAuctionProcessor()
+    proc.vcgClass = processor_pulp.VcgFake
+    res = proc.solve(slots,bidderInfos,None,None)
+    
 
 def exampleRealistic1():
     slot_length = 120
@@ -104,14 +124,15 @@ def exampleRealistic1():
     bidderInfos = {}
     for bidder_id,reach_mod,price_mod,length_mod in zip(range(bidder_amount),bidder_reach_modifiers,bidder_price_modifiers,bidder_length_modifiers):
         reach = int(bidder_reach_baseline*reach_mod)
-        length = bidder_length_baseline * length_mod
+        length = int(bidder_length_baseline * length_mod)
         # price is correlated to reach and length
         budget = round(bidder_price_baseline * price_mod * length * reach,2)
         # ('id','budget','length','attrib_min','attrib_values'))
         bidderInfos[bidder_id] = BidderInfo(bidder_id, budget, length, reach, slots_reaches)
         
     proc = TvAuctionProcessor()
-    return proc.solve(slots,bidderInfos)
+    proc.vcgClass = processor_pulp.VcgFake
+    return proc.solve(slots,bidderInfos,timeLimit=10)
         
 def generate_random_color():
     import colorsys
@@ -136,7 +157,7 @@ def drawit(save_path,res):
     bar_labels = []
     
     for (ptype,pcolor) in zip(['raw','vcg','core','final'],[(0,1,1),(0,0,0),(1,0,1),(1,1,0)]):
-        vals = [v for (_k,v) in sorted(res['prices_%s' % ptype].iteritems())]
+        vals = [v for (k,v) in sorted(res['prices_%s' % ptype].iteritems()) if k in ind]
 #        ax.bar(ind+(nr*width*1.8), vals, width, color=pcolor,alpha=0.3,linewidth=0)
         bar = ax.bar(ind, vals, width, color=pcolor,alpha=0.5,linewidth=0)
         bars.append(bar)
@@ -149,8 +170,8 @@ def drawit(save_path,res):
     
 def main():    
     import json
-    ex_fns = [example1,example2,example3,example4,example5][-1:]
-    ex_names = ['example1','example2','example3','example4','example5'][-1:]
+    ex_fns = [example1,example2,example3,example4,example5][:3]
+    ex_names = ['example1','example2','example3','example4','example5'][:3]
     for ex_n,ex_fn in zip(ex_names,ex_fns):
         print 'running %s' % ex_n
         res = ex_fn()
@@ -166,4 +187,4 @@ def main_realistic():
 if __name__=='__main__':
     logging.basicConfig(level=logging.INFO)    
     main()
-    #main_realistic()
+#    main_realistic()
