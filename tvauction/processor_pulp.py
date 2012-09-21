@@ -188,8 +188,8 @@ class CorePricing(object):
             prob_ebpo += (pi[w]-m <= prices_vcg[w], 'pi_constr_%d' % w)
         ebpo_solver = pu.GUROBI(msg=SOLVER_MSG, mip=False)
         
-        # initialize revenue_sep and prices_t_sum vars, used for comparisons
-        revenue_sep = revenue_sep_last = 0
+        # initialize obj_value_sep and prices_t_sum vars, used for comparisons
+        obj_value_sep = obj_value_sep_last = 0
         prices_t_sum = prices_t_sum_last = sum(prices_t.itervalues())
         
         # get problem vars
@@ -217,21 +217,22 @@ class CorePricing(object):
             logging.info('sep:\tstatus: %s' % pu.LpStatus[solver_status])
             
             # save the value: z(π^t)
-            revenue_sep, revenue_sep_last = pu.value(prob_sep.objective), revenue_sep
+            obj_value_sep, obj_value_sep_last = pu.value(prob_sep.objective), obj_value_sep
             
             # check for a blocking coalition. if no coalition exists, break 
-            blocking_coalition_exists = revenue_sep > prices_t_sum
+            blocking_coalition_exists = obj_value_sep > prices_t_sum
             if not blocking_coalition_exists:
-                logging.info('sep:\tvalue: %d, blocking: None' % revenue_sep)
+                logging.info('sep:\tvalue: %d, blocking: None' % obj_value_sep)
                 break
 
             # get the blocking coalition
             blocking_coalition = frozenset(bidder_id for (bidder_id,y_j) in y.iteritems() if round(y_j.value())==1)
-            logging.info('sep:\tvalue: %d, blocking: %s' % (revenue_sep, sorted(blocking_coalition),))
+            logging.info('sep:\tvalue: %d, blocking: %s' % (obj_value_sep, sorted(blocking_coalition),))
             
             # find out if the currently blocking coalition generates a higher revenue 
             blocking_coalition_with_revenue = dict((b_id,b.budget) for (b_id,b) in bidderInfos.iteritems() if b_id in blocking_coalition)
             revenue_blocking_coalition = sum(blocking_coalition_with_revenue.itervalues())
+            
             blocking_coalition_revenue_difference = revenue_blocking_coalition - revenue_raw                                  
             logging.info('sep:\tvalue_blocking_coalition: %d, diff: %s' % (sum(blocking_coalition_with_revenue.itervalues()), blocking_coalition_revenue_difference))
             
@@ -257,14 +258,15 @@ class CorePricing(object):
                 prices_t = prices_vcg.copy()
                 
                 # recreate the ebpo
+                pi = dict((w,pu.LpVariable('pi_%d' % (w,), cat=pu.LpContinuous, lowBound=prices_vcg[w], upBound=blocking_coalition_with_revenue[w])) for w in winners)
                 prob_ebpo = pu.LpProblem('ebpo',pu.LpMinimize)
-                pi = dict((w,pu.LpVariable('pi_%d' % (w,), cat=pu.LpContinuous, lowBound=prices_vcg[w], upBound=blocking_coalition_with_revenue[w])) for w in blocking_coalition)
-
-                for w in blocking_coalition: prob_ebpo += (pi[w]-m <= prices_vcg[w], 'pi_constr_%d' % w)
                 prob_ebpo += sum(pi.itervalues()) + epsilon*m
+                
+                # ebpo: add vcg price constraints 
+                for w in blocking_coalition: prob_ebpo += (pi[w]-m <= prices_vcg[w], 'pi_constr_%d' % w)
 
                 # update step_info
-                step_info.append({'raw':revenue_raw,'vcg':sum(prices_vcg.itervalues()),'blocking_coalition':revenue_blocking_coalition,'sep':revenue_sep})
+                step_info.append({'raw':revenue_raw,'vcg':sum(prices_vcg.itervalues()),'blocking_coalition':revenue_blocking_coalition,'sep':obj_value_sep})
                 # start a new round for the sep (since we recreated the prices_t vector with the vcg values)
                 continue
             
@@ -273,7 +275,7 @@ class CorePricing(object):
             
             # add (iteratively) new constraints to the ebpo problem.
             # revenue_without_blocking can be at most the sum of the prices_raw of winners_nonblocking
-            revenue_without_blocking = revenue_sep - sum(prices_t[wb] for wb in winners_blocking)
+            revenue_without_blocking = obj_value_sep - sum(prices_t[wb] for wb in winners_blocking)
             
             # TRIM_VALUES algorithm: simply trim the revenue_without_blocking (enable the following line)
             if self.algorithm==self.TRIM_VALUES:
@@ -293,11 +295,11 @@ class CorePricing(object):
             logging.info('ebpo:\trevenue: %d' % prices_t_sum)
 
             # update step_info
-            step_info.append({'blocking_coalition':revenue_blocking_coalition,'ebpo':prices_t_sum,'sep':revenue_sep})
+            step_info.append({'blocking_coalition':revenue_blocking_coalition,'ebpo':prices_t_sum,'sep':obj_value_sep})
             
             # if both z(π^t) == z(π^t-1) and θ^t == θ^t-1, we are in a local optimum we cannot escape
             # proposition: this happens when the gwd returned a suboptimal solution, causing a winner allocation.
-            if revenue_sep == revenue_sep_last and prices_t_sum == prices_t_sum_last:
+            if obj_value_sep == obj_value_sep_last and prices_t_sum == prices_t_sum_last:
                 logging.warn('core:\tvalue did not change. aborting.') 
                 break
         else:
