@@ -69,7 +69,6 @@ class Gwd(object):
         return (solver_status,(revenue_raw, prices_raw, winners))
     
     def getSlotAssignments(self, winners, x):
-        slots_winners = {}
         winners_slots = dict((w,[]) for w in winners)
         for slot_id, slot_user_vars in x.iteritems():
             slot_winners = [user_id for (user_id,has_won) in slot_user_vars.iteritems() if round(has_won.value()) == 1]
@@ -138,7 +137,7 @@ class Vcg(object):
     
     def getPricesForBidders(self, bidderInfos, revenue_raw, revenues_without_bidders):
         return dict(
-            (w, self.vcg.getPriceForBidder(bidderInfos[w].budget, revenue_raw, revenue_without_w))
+            (w, self.getPriceForBidder(bidderInfos[w].budget, revenue_raw, revenue_without_w))
             for (w,revenue_without_w) in revenues_without_bidders.iteritems()
         )
         
@@ -192,8 +191,11 @@ class CorePricing(object):
         # get problem vars
         x, y, _cons = prob_vars
         
+        # store information about the steps (in order to get insights / draw graphs of the process)
+        step_info = [{'raw':revenue_raw,'vcg':sum(prices_vcg.itervalues())}]
+        
         # abort after 1000 iterations (this should never happen)
-        for cnt in xrange(1000):
+        for cnt in xrange(1,1000):
             # make a copy of prob_gwd, since we are using it as basis
             prob_sep = prob_gwd.deepcopy()
             prob_sep.name = 'sep_%d' % cnt
@@ -257,6 +259,8 @@ class CorePricing(object):
                 for w in blocking_coalition: prob_ebpo += (pi[w]-m <= prices_vcg[w], 'pi_constr_%d' % w)
                 prob_ebpo += sum(pi.itervalues()) + epsilon*m
 
+                # update step_info
+                step_info.append({'raw':revenue_raw,'vcg':sum(prices_vcg.itervalues()),'blocking_coalition':revenue_blocking_coalition,'sep':revenue_sep})
                 # start a new round for the sep (since we recreated the prices_t vector with the vcg values)
                 continue
             
@@ -284,6 +288,9 @@ class CorePricing(object):
             prices_t_sum, prices_t_sum_last = sum(prices_t.itervalues()), prices_t_sum
             logging.info('ebpo:\trevenue: %d' % prices_t_sum)
 
+            # update step_info
+            step_info.append({'blocking_coalition':revenue_blocking_coalition,'ebpo':prices_t_sum,'sep':revenue_sep})
+            
             # if both z(π^t) == z(π^t-1) and θ^t == θ^t-1, we are in a local optimum we cannot escape
             # proposition: this happens when the gwd returned a suboptimal solution, causing a winner allocation.
             if revenue_sep == revenue_sep_last and prices_t_sum == prices_t_sum_last:
@@ -295,7 +302,7 @@ class CorePricing(object):
         # there is no blocking coalition -> the current iteration of the ebpo contains core prices
         revenue_core = sum(prices_t.itervalues())
         logging.info('core:\trevenue %d\tprices: %s' % (revenue_core,[(k,round(v,2)) for (k,v) in prices_t.iteritems()]))
-        return (revenue_core, prices_t, prices_raw, prices_vcg, winners_slots)
+        return (revenue_core, prices_t, prices_raw, prices_vcg, winners_slots, step_info)
 
 class TvAuctionProcessor(object):
     def __init__(self):
@@ -336,11 +343,11 @@ class TvAuctionProcessor(object):
         
         # solve vcg
         vcg = self.vcgClass(gwd)
-        _revenue_vcg, prices_vcg, revenues_without_bidders = vcg.solve(slots, bidderInfos, revenue_raw, winners, prob_gwd, prob_vars)
+        _revenue_vcg, _prices_vcg, revenues_without_bidders = vcg.solve(slots, bidderInfos, revenue_raw, winners, prob_gwd, prob_vars)
 
         # solve core pricing problem
         core = self.coreClass(gwd, vcg)
-        _revenue_core, prices_core, prices_raw, prices_vcg, winners_slots_core = core.solve(prob_gwd, bidderInfos, winners, prices_raw, revenues_without_bidders, prob_vars)
+        _revenue_core, prices_core, prices_raw, prices_vcg, winners_slots_core, step_info = core.solve(prob_gwd, bidderInfos, winners, prices_raw, revenues_without_bidders, prob_vars)
         if winners_slots_core: winners_slots = winners_slots_core
         
         # raise prices to the reserve price if needed
@@ -353,7 +360,8 @@ class TvAuctionProcessor(object):
             'prices_raw': prices_raw,
             'prices_vcg': prices_vcg,
             'prices_core': prices_core,
-            'prices_final': prices_after
+            'prices_final': prices_after,
+            'step_info': step_info
         }
      
 if __name__ == '__main__':
