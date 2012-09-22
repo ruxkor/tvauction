@@ -11,13 +11,14 @@ import random
 from pprint import pprint as pp
 
 SOLVER_MSG = False
+SOLVER_CLASS = pu.GUROBI
 
 Slot = namedtuple('Slot', ('id','price','length'))
 BidderInfo = namedtuple('BidderInfo', ('id','budget','length','attrib_min','attrib_values'))
 
 class Gwd(object):
     def __init__(self):
-        self.solver = pu.GUROBI(msg=SOLVER_MSG)
+        self.solver = SOLVER_CLASS(msg=SOLVER_MSG)
         self.prob = None
         
     def generate(self, slots, bidderInfos):
@@ -32,7 +33,7 @@ class Gwd(object):
         # the sum of all assigned ad lengths has to be at most the length of the slot
         for (i,slot) in slots.iteritems():
             f = sum(bidderInfo.length*x[i][j] for (j,bidderInfo) in bidderInfos.iteritems())
-            cons.append(f <= slot.length)
+            cons.append( (f <= slot.length , 'slotlen_constr_%d' % i) )
         # match the bidders' demands regarding their attributes
         # attrib_values has to be a list with the same length
         # as the slots list
@@ -41,12 +42,12 @@ class Gwd(object):
             M = sum(bidderInfo.attrib_values.itervalues())+1
             f = sum(attrib_value*x[i][j] for (i,attrib_value) in bidderInfo.attrib_values.iteritems())
             f2 = bidderInfo.attrib_min - f
-            cons.append(f <= M*y[j])
-            cons.append(f2 <= M*(1-y[j]))
+            cons.append( (f <= M*y[j], 'M_constr_%d.1' % j) )
+            cons.append( (f2 <= M*(1-y[j]), 'M_constr_%d.2' % j) )
         # user can at most spend the maximum price
         for (j,bidderInfo) in bidderInfos.iteritems():
             f = sum(bidderInfo.length*slot.price*x[i][j] for (i,slot) in slots.iteritems())
-            cons.append(f <= bidderInfo.budget)
+            cons.append( (f <= bidderInfo.budget, 'budget_constr_%d' % j) )
         # oovar domain=bool takes already care of min and max bounds
         prob = pu.LpProblem('gwd', pu.LpMaximize)
         prob += sum(bidderInfo.budget*y[j] for (j,bidderInfo) in bidderInfos.iteritems())
@@ -71,7 +72,7 @@ class Gwd(object):
     def getSlotAssignments(self, winners, x):
         winners_slots = dict((w,[]) for w in winners)
         for slot_id, slot_user_vars in x.iteritems():
-            slot_winners = [user_id for (user_id,has_won) in slot_user_vars.iteritems() if round(has_won.value()) == 1]
+            slot_winners = [user_id for (user_id,has_won) in slot_user_vars.iteritems() if has_won.value() and round(has_won.value()) == 1]
             for slot_winner in slot_winners: winners_slots[slot_winner].append(slot_id)
         return winners_slots
     
@@ -104,6 +105,13 @@ class VcgFake(object):
     
     def getPriceForBidder(self, budget, revenue_raw, revenue_without_bidder):
         return 0
+    
+    def getPricesForBidders(self, bidderInfos, revenue_raw, revenues_without_bidders):
+        return dict(
+            (w, self.getPriceForBidder(bidderInfos[w].budget, revenue_raw, revenue_without_w))
+            for (w,revenue_without_w) in revenues_without_bidders.iteritems()
+        )
+    
 
 class Vcg(object):
     def __init__(self, gwd):
@@ -157,7 +165,6 @@ class CorePricing(object):
         self.algorithm = algorithm
     
     def solve(self, prob_gwd, bidderInfos, winners, prices_raw, revenues_without_bidders, prob_vars):
-        
         # copy some variables in order to not cause side effects in them
         prices_raw = prices_raw.copy()
         revenues_without_bidders = revenues_without_bidders.copy()
@@ -173,7 +180,7 @@ class CorePricing(object):
         prices_t = prices_vcg.copy()
         
         # constants: ε (should be 'small enough')
-        epsilon = 1
+        epsilon = 1e-31
         
         # variables: π_j, m
         # π_j is built for all bidders (instead of only for the winners), since the winning coalition may change 
@@ -184,9 +191,8 @@ class CorePricing(object):
         prob_ebpo += sum(pi.itervalues()) + epsilon*m 
         
         # ebpo constraint: π_j - m <= π_j^vcg 
-        for w in winners:
-            prob_ebpo += (pi[w]-m <= prices_vcg[w], 'pi_constr_%d' % w)
-        ebpo_solver = pu.GUROBI(msg=SOLVER_MSG, mip=False)
+        for w in winners: prob_ebpo += (pi[w]-m <= prices_vcg[w], 'pi_constr_%d' % w)
+        ebpo_solver = SOLVER_CLASS(msg=SOLVER_MSG, mip=False)
         
         # initialize obj_value_sep and prices_t_sum vars, used for comparisons
         obj_value_sep = obj_value_sep_last = 0
@@ -194,6 +200,9 @@ class CorePricing(object):
         
         # get problem vars
         x, y, _cons = prob_vars
+        
+        # store revenues_blocking_coalitions with coalitions as key
+        revenues_coalitions = []
         
         # store information about the steps (in order to get insights / draw graphs of the process)
         step_info = [{'raw':revenue_raw,'vcg':sum(prices_vcg.itervalues())}]
@@ -232,9 +241,18 @@ class CorePricing(object):
             # find out if the currently blocking coalition generates a higher revenue 
             blocking_coalition_with_revenue = dict((b_id,b.budget) for (b_id,b) in bidderInfos.iteritems() if b_id in blocking_coalition)
             revenue_blocking_coalition = sum(blocking_coalition_with_revenue.itervalues())
-            
+             
             blocking_coalition_revenue_difference = revenue_blocking_coalition - revenue_raw                                  
             logging.info('sep:\tvalue_blocking_coalition: %d, diff: %s' % (sum(blocking_coalition_with_revenue.itervalues()), blocking_coalition_revenue_difference))
+
+            winners_nonblocking = winners - blocking_coalition
+            winners_blocking = winners & blocking_coalition
+            
+            # update the blocking coalitions value
+            revenues_coalitions.append((winners_nonblocking,winners_blocking,revenue_blocking_coalition))
+            
+            # blocking_y_vals = frozenset(bidder_id for (bidder_id,t_j) in t.iteritems() if round(t_j.value())==1)
+            # logging.info('sep:\tblocking y values: %s' % (sorted(blocking_y_vals),))
             
             # SWITCH_COALITION algorithm: switch the winning coalition, if it generates more revenue than the current one
             if blocking_coalition_revenue_difference > 0 and self.algorithm==self.SWITCH_COALITION:
@@ -257,6 +275,9 @@ class CorePricing(object):
                 # update prices_t
                 prices_t = prices_vcg.copy()
                 
+                # update step_info
+                step_info.append({'raw':revenue_raw,'vcg':sum(prices_vcg.itervalues()),'blocking_coalition':revenue_blocking_coalition,'sep':obj_value_sep})
+                
                 # recreate the ebpo
                 pi = dict((w,pu.LpVariable('pi_%d' % (w,), cat=pu.LpContinuous, lowBound=prices_vcg[w], upBound=blocking_coalition_with_revenue[w])) for w in winners)
                 prob_ebpo = pu.LpProblem('ebpo',pu.LpMinimize)
@@ -264,36 +285,50 @@ class CorePricing(object):
                 
                 # ebpo: add vcg price constraints 
                 for w in blocking_coalition: prob_ebpo += (pi[w]-m <= prices_vcg[w], 'pi_constr_%d' % w)
-
-                # update step_info
-                step_info.append({'raw':revenue_raw,'vcg':sum(prices_vcg.itervalues()),'blocking_coalition':revenue_blocking_coalition,'sep':obj_value_sep})
-                # start a new round for the sep (since we recreated the prices_t vector with the vcg values)
-                continue
-            
-            winners_nonblocking = winners-blocking_coalition
-            winners_blocking = winners&blocking_coalition
-            
-            # add (iteratively) new constraints to the ebpo problem.
-            # revenue_without_blocking can be at most the sum of the prices_raw of winners_nonblocking
-            revenue_without_blocking = obj_value_sep - sum(prices_t[wb] for wb in winners_blocking)
-            
-            # TRIM_VALUES algorithm: simply trim the revenue_without_blocking (enable the following line)
-            if self.algorithm==self.TRIM_VALUES:
-                revenue_without_blocking = min(sum(prices_raw[wnb] for wnb in winners_nonblocking), revenue_without_blocking)
-            
-            prob_ebpo += sum(pi[wnb] for wnb in winners_nonblocking) >= revenue_without_blocking
-            
-            # solve the ebpo (this problem can be formulated as a continuous LP).
+                
+                # ebpo: add pi constraints
+                for nr, (bidders_past_nb,bidders_past_b,revenue_past) in enumerate(revenues_coalitions):
+                    winners_past_nb = winners & bidders_past_nb
+                    winners_past_b = winners & bidders_past_b
+                    if winners_past_nb and winners_past_b:
+                        revenue_without_blocking = revenue_past - sum(bidderInfos[wb].budget for wb in winners_past_b)
+                        prob_ebpo += (sum(pi[wnb] for wnb in winners_past_nb) >= revenue_without_blocking,'ebpo_constr_%d' % nr)
+                    # start a new round for the sep (since we recreated the prices_t vector with the vcg values)
+            else:
+                winners_nonblocking = winners - blocking_coalition
+                winners_blocking = winners & blocking_coalition
+                
+                logging.info('sep:\twinners: blocking: %s non-blocking: %s' % (sorted(winners_blocking),sorted(winners_nonblocking)))
+                
+                # add (iteratively) new constraints to the ebpo problem.
+                # original formulation:
+                # revenue_without_blocking = obj_value_sep - sum(prices_t[wb] for wb in winners_blocking)
+                # new formulation:
+                revenue_without_blocking = revenue_blocking_coalition - sum(bidderInfos[wb].budget for wb in winners_blocking)
+                
+                # TRIM_VALUES algorithm: simply trim the revenue_without_blocking (enable the following line)
+                # revenue_without_blocking can be at most the sum of the prices_raw of winners_nonblocking
+                if self.algorithm==self.TRIM_VALUES:
+                    revenue_without_blocking = min(sum(prices_raw[wnb] for wnb in winners_nonblocking), revenue_without_blocking)
+                
+                # ebpo: add pi constraints
+                prob_ebpo += (sum(pi[wnb] for wnb in winners_nonblocking) >= revenue_without_blocking, 'ebpo_constr_%d' % cnt)
+                
+            # ebpo: solve (this problem can be formulated as a continuous LP).
             prob_ebpo.writeLP('ebpo.lp')
             logging.info('ebpo:\tcalculating - step %s' % (cnt),)
             solver_status = prob_ebpo.solve(ebpo_solver)
-            assert solver_status == pu.LpStatusOptimal
             
             # update the π_t list. sum(π_t) has to be equal or increase for each t
             prices_t = dict((int(b.name[3:]), b.varValue) for b in prob_ebpo.variables() if b.name[:2]=='pi')
-            prices_t_sum, prices_t_sum_last = sum(prices_t.itervalues()), prices_t_sum
-            logging.info('ebpo:\trevenue: %d' % prices_t_sum)
+            prices_t_sum, prices_t_sum_last = round(sum(prices_t.itervalues()),2), prices_t_sum
+            
+            logging.info('ebpo:\trevenue %d\tprices: %s' % (prices_t_sum,[(k,round(v,2)) for (k,v) in prices_t.iteritems()]))
+            assert solver_status == pu.LpStatusOptimal, 'ebpo: not optimal - %s' % pu.LpStatus[solver_status]
+            
+            assert prices_t_sum >= prices_t_sum_last, 'ebpo: decrease between steps'
 
+#            assert revenue_without_blocking_check == revenue_without_blocking_check_2, ("no: %s %s" % (revenue_without_blocking_check,revenue_without_blocking_check_2))
             # update step_info
             step_info.append({'blocking_coalition':revenue_blocking_coalition,'ebpo':prices_t_sum,'sep':obj_value_sep})
             
@@ -320,13 +355,14 @@ class TvAuctionProcessor(object):
     def isOptimal(self,solver_status):
         return solver_status == pu.LpStatusOptimal
     
-    def solve(self, slots, bidderInfos, timeLimit=20, timeLimitGwd=20, epgap=0.02):
+    def solve(self, slots, bidderInfos, timeLimit=20, timeLimitGwd=20, epgap=None):
         '''solve the wdp and pricing problem.
         
-        @param slots:       a dict of Slot objects
-        @param bidderInfos: a dict of BidderInfo objects
-        @param timeLimit:   int|null, if int, then the time will be doubled for the gwd. is used for all integer problems.
-        @param epgap:       float|null, if int, is used for all integer problems.'''
+        @param slots:        a dict of Slot objects
+        @param bidderInfos:  a dict of BidderInfo objects
+        @param timeLimit:    int|null, sets the time limit for all integer problems.
+        @param timeLimitGwd: int|null, lets you override the time limit for the gwd because of its importance. 
+        @param epgap:        float|null, is used for all integer problems.'''
         
         # generate the gwd    
         gwd = self.gwdClass()

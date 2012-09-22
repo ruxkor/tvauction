@@ -4,6 +4,7 @@
 
 
 import random
+import time
 import numpy as np
 from scipy import stats
 from pprint import pprint as pp
@@ -251,17 +252,19 @@ def drawResult(file_prefix, res):
     fig.savefig(file_prefix+'_2.pdf')
     
 if __name__=='__main__':
-    from optparse import OptionParser
+    import os
     import sys
+    import optparse
     import json
+    
     def convertToJson(opt, opt_str, value, parser):
         setattr(parser.values,opt.dest,json.loads(value))
-    parser = OptionParser()
+    parser = optparse.OptionParser()
     parser.add_option('--random-seed',dest='random_seed',type='int',default=1,help='random seed')
     parser.add_option('--zero-price-vector',dest='zero_price',action='store_true',default=False,help='don\'t calculate the vcg prices. use a 0 price vector instead')
-    parser.add_option('--draw',dest='draw_results',action='store_true',default=False,help='draw graph depicting the allocation and the process')
-    parser.add_option('--slot-qty',dest='slot_qty',type='int',default=50,help='slot quantity')
-    parser.add_option('--bidder-qty',dest='bidder_qty',type='int',default=50,help='bidder quantity')
+    parser.add_option('--no-draw',dest='draw_results',action='store_false',default=True,help='draw graph depicting the allocation and the process')
+    parser.add_option('--slot-qty',dest='slot_qty',type='int',default=20,help='slot quantity')
+    parser.add_option('--bidder-qty',dest='bidder_qty',type='int',default=40,help='bidder quantity')
     parser.add_option('--slot-duration-max',dest='slot_duration_max',type='int',default=120,help='slot maximum duration')
     parser.add_option('--advert-duration-max',dest='advert_duration_max',type='int',default=100,help='advert maximum duration')
     parser.add_option('--advert-price-max',dest='advert_price_max',type='float',default=100.0,help='advert maximum price (per second)')
@@ -298,7 +301,7 @@ if __name__=='__main__':
     distributions = options.distributions
     
     random_seed = options.random_seed
-    draw_results = options.draw_results or True
+    draw_results = options.draw_results
     use_zero_price = options.zero_price
     
     # set the seed to random in order to get consistent results
@@ -356,9 +359,13 @@ if __name__=='__main__':
              campaign_min_prio_range
         )
 
-
     
-    logging.basicConfig(level=logging.INFO)
+    log_level = int(os.environ['LOG_LEVEL']) \
+        if 'LOG_LEVEL' in os.environ \
+        else logging.WARN
+    
+    logging.basicConfig(level=log_level)
+    
     auction_processor = processor_pulp.TvAuctionProcessor()
     if use_zero_price: auction_processor.vcgClass = processor_pulp.VcgFake
     
@@ -393,9 +400,23 @@ if __name__=='__main__':
                 attrib_min=bidder_attrib_min,
                 attrib_values=bidder_prio_values
             )
-            
-        res = auction_processor.solve(slots, bidderInfos,5,20)
+        
+        # run it..    
+        calc_duration = -time.clock()
+        print 'distribution: ', distribution
+        print 'solving...'
+        
+#        res = auction_processor.solve(slots, bidderInfos, 5, 1, None)
+        res = auction_processor.solve(slots, bidderInfos, None, None, None)
+        
+        calc_duration += time.clock()
+        print 'duration: %.1f seconds' % calc_duration
+        
+        print 'revenues:'
+        for what in ('raw','vcg','core','final'): print '  %s\t%d' % (what, sum(res['prices_%s' % what].itervalues()))
+        
         if draw_results:
             now = '' # datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')
             drawResult('/tmp/tvauction_simulation_%s_%s' % (now,''.join(map(str,distribution))), res)
+            
         results.append(res)
