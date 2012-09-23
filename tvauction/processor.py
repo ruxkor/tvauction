@@ -17,6 +17,7 @@ Slot = namedtuple('Slot', ('id','price','length'))
 BidderInfo = namedtuple('BidderInfo', ('id','budget','length','attrib_min','attrib_values'))
 
 class Gwd(object):
+    '''general winner determination'''
     def __init__(self):
         self.solver = SOLVER_CLASS(msg=SOLVER_MSG)
         self.prob = None
@@ -92,9 +93,17 @@ class ReservePrice(object):
 # TODO: use the epgap to raise the revenue_without_bidder (so vcg price gets lower)
 # if not, we risk too high vcg prices which could cause infeasibilities!
 #
-class VcgFake(object):
+class InitialPricing(object):
     def __init__(self, gwd):
         self.gwd = gwd
+    def getPricesForBidders(self, bidderInfos, revenue_raw, winners, revenues_without_bidders):
+        return dict(
+            (w, self.getPriceForBidder(bidderInfos[w].budget, revenue_raw, revenue_without_w))
+            for (w,revenue_without_w) in revenues_without_bidders.iteritems() if w in winners
+        )
+        
+class Zero(InitialPricing):
+    '''the zero pricing vector class'''
         
     def solve(self, slots, bidderInfos, revenue_raw, winners, prob_gwd, prob_vars):
         prices_zero = dict((w,0) for w in winners)
@@ -106,14 +115,7 @@ class VcgFake(object):
     def getPriceForBidder(self, budget, revenue_raw, revenue_without_bidder):
         return 0
     
-    def getPricesForBidders(self, bidderInfos, revenue_raw, revenues_without_bidders):
-        return dict(
-            (w, self.getPriceForBidder(bidderInfos[w].budget, revenue_raw, revenue_without_w))
-            for (w,revenue_without_w) in revenues_without_bidders.iteritems()
-        )
-    
-
-class Vcg(object):
+class Vcg(InitialPricing):
     def __init__(self, gwd):
         self.gwd = gwd
     
@@ -148,19 +150,13 @@ class Vcg(object):
     def getPriceForBidder(self, budget, revenue_raw, revenue_without_bidder):
         return max(0, budget - max(0, (revenue_raw-revenue_without_bidder)))
     
-    def getPricesForBidders(self, bidderInfos, revenue_raw, revenues_without_bidders):
-        return dict(
-            (w, self.getPriceForBidder(bidderInfos[w].budget, revenue_raw, revenue_without_w))
-            for (w,revenue_without_w) in revenues_without_bidders.iteritems()
-        )
-        
-        
 class CorePricing(object):
     
     TRIM_VALUES=1
     SWITCH_COALITION=2
+    SWITCH_COALITION_UPDATE_EBPO=3
     
-    def __init__(self, gwd, vcg, algorithm=SWITCH_COALITION):
+    def __init__(self, gwd, vcg, algorithm=SWITCH_COALITION_UPDATE_EBPO):
         self.gwd = gwd
         self.vcg = vcg
         self.algorithm = algorithm
@@ -174,7 +170,7 @@ class CorePricing(object):
         winners_slots = None
         
         revenue_raw = sum(prices_raw.itervalues())
-        prices_vcg = self.vcg.getPricesForBidders(bidderInfos, revenue_raw, revenues_without_bidders)
+        prices_vcg = self.vcg.getPricesForBidders(bidderInfos, revenue_raw, winners, revenues_without_bidders)
         
         # build ebpo
         prob_ebpo = pu.LpProblem('ebpo',pu.LpMinimize)
@@ -256,7 +252,7 @@ class CorePricing(object):
             # logging.info('sep:\tblocking y values: %s' % (sorted(blocking_y_vals),))
             
             # SWITCH_COALITION algorithm: switch the winning coalition, if it generates more revenue than the current one
-            if blocking_coalition_revenue_difference > 0 and self.algorithm==self.SWITCH_COALITION:
+            if blocking_coalition_revenue_difference > 0 and self.algorithm in (self.SWITCH_COALITION,self.SWITCH_COALITION_UPDATE_EBPO):
                 
                 # update all variables related to the gwd
                 revenue_raw = revenue_blocking_coalition
@@ -271,7 +267,7 @@ class CorePricing(object):
                 )
                 
                 # update prices_vcg using the (new) revenue
-                prices_vcg = self.vcg.getPricesForBidders(bidderInfos, revenue_raw, revenues_without_bidders)
+                prices_vcg = self.vcg.getPricesForBidders(bidderInfos, revenue_raw, winners, revenues_without_bidders)
                 
                 # update prices_t
                 prices_t = prices_vcg.copy()
@@ -290,13 +286,13 @@ class CorePricing(object):
                 # ebpo: add pi constraints:
                 # go through all already taken ebpo constraints and add the constraints again
                 # all obsolete bidders. we also have to remove their part of the revenue calculated.
-                if UPDATE_EBPO:
+                if self.algorithm == self.SWITCH_COALITION_UPDATE_EBPO:
                     for nr, (winners_past_nb,winners_past_b) in enumerate(revenues_coalitions):
                         winners_nb_filtered = winners & winners_past_nb
                         winners_b_filtered = winners & winners_past_b
                         # only add constraints when the new coalition is somehow involved
                         if winners_nb_filtered and winners_b_filtered:
-                            # generate the revenue by adding up only the winners that participated
+                            # generate the revenue by summing up only the winners that participated
                             revenue_past = sum(bidderInfos[w].budget for w in winners_b_filtered | winners_nb_filtered)
                             # add the ebpo constraint
                             revenue_without_blocking_winners = revenue_past - sum(bidderInfos[wb].budget for wb in winners_b_filtered)
@@ -322,7 +318,7 @@ class CorePricing(object):
                 prob_ebpo += (sum(pi[wnb] for wnb in winners_nonblocking) >= revenue_without_blocking_winners, 'ebpo_constr_%d' % cnt)
                 
             # ebpo: solve (this problem can be formulated as a continuous LP).
-            prob_ebpo.writeLP('ebpo_%d.lp' % cnt)
+            # prob_ebpo.writeLP('ebpo_%d.lp' % cnt)
             logging.info('ebpo:\tcalculating - step %s' % (cnt),)
             solver_status = prob_ebpo.solve(ebpo_solver)
             
@@ -355,6 +351,7 @@ class TvAuctionProcessor(object):
         self.vcgClass = Vcg
         self.reservePriceClass = ReservePrice
         self.coreClass = CorePricing
+        self.core_algorithm = CorePricing.SWITCH_COALITION_UPDATE_EBPO
         
     def isOptimal(self,solver_status):
         return solver_status == pu.LpStatusOptimal
@@ -392,7 +389,7 @@ class TvAuctionProcessor(object):
         _revenue_vcg, _prices_vcg, revenues_without_bidders = vcg.solve(slots, bidderInfos, revenue_raw, winners, prob_gwd, prob_vars)
 
         # solve core pricing problem
-        core = self.coreClass(gwd, vcg)
+        core = self.coreClass(gwd, vcg, self.core_algorithm)
         _revenue_core, prices_core, prices_raw, prices_vcg, winners_slots_core, step_info = core.solve(prob_gwd, bidderInfos, winners, prices_raw, revenues_without_bidders, prob_vars)
         if winners_slots_core: winners_slots = winners_slots_core
         

@@ -214,7 +214,7 @@ def drawResult(file_prefix, res):
 
     ax1.set_xticks(ind)
     ax1.set_xticklabels(ind)
-    ax1.legend(bars,bar_labels)
+    ax1.legend(bars, bar_labels, loc='upper center', ncol=4, bbox_to_anchor=(0.5,1.12))
     
     fig.savefig(file_prefix+'_1.pdf')
 
@@ -228,12 +228,12 @@ def drawResult(file_prefix, res):
     tuples_all = {}
     for what in ('raw','vcg','sep','blocking_coalition','ebpo'):
         tuples_all[what] = tuples_what = [(nr, step_info[what]) for (nr, step_info) in enumerate(steps_info) if what in step_info]
-        step_max = max(step_max, *(s for (s,v) in tuples_what))
+        if tuples_what: step_max = max(step_max, *(s for (s,v) in tuples_what))
         
     for what in ('raw','vcg','sep','blocking_coalition','ebpo'):
         tuples_what = tuples_all[what]
-        if tuples_what[-1][0] != step_max:
-            tuples_what.append( (step_max,None) )
+        if not tuples_what: continue
+        if tuples_what[-1][0] != step_max: tuples_what.append( (step_max,None) )
         
         steps_what = []
         values_what = []
@@ -246,11 +246,11 @@ def drawResult(file_prefix, res):
             steps_what.append(step_what)
             values_what.append(value_what if value_what is not None else value_prev)
         
-        ax2.plot(steps_what, values_what,drawstyle='steps-post',label=what,linestyle='-', linewidth=2.0, alpha=0.8)
+        ax2.plot(steps_what, values_what, '.', drawstyle='steps-post',label=what,linestyle='-', linewidth=2.0, markersize=10.0)
     
     
     ax2.set_xlim(-0.1,step_max+0.1)
-    ax2.legend(loc='upper left')
+    ax2.legend(loc='upper center',ncol=5,bbox_to_anchor=(0.5,1.09))
     fig.savefig(file_prefix+'_2.pdf')
     
 if __name__=='__main__':
@@ -261,11 +261,11 @@ if __name__=='__main__':
         setattr(parser.values,opt.dest,json.loads(value))
     parser = optparse.OptionParser()
     parser.add_option('--random-seed',dest='random_seed',type='int',default=1,help='random seed')
-    parser.add_option('--zero-price',dest='zero_price',action='store_true',default=False,help='don\'t calculate the vcg prices. use a 0 price vector instead')
-    parser.add_option('--no-update-ebpo',dest='update_ebpo',action='store_false',default=True,help='don\'t calculate the vcg prices. use a 0 price vector instead')
+    parser.add_option('--initial-price-vector',dest='price_vector',choices=('vcg','zero'),default='vcg',help='the type of price vector used as a starting point for core price generation (vcg,zero)')
+    parser.add_option('--core-algorithm',dest='core_algorithm',choices=('trim','switch','update'),default='update',help='which algorithm should be used in case a suboptimal winner determination is discovered during core pricing (trim: trim the values to be within a feasible region, switch: recreate the ebpo,update: recreate the ebpo and try to re-use already existing constraints)')
     parser.add_option('--no-draw',dest='draw_results',action='store_false',default=True,help='draw graph depicting the allocation and the process')
     parser.add_option('--slot-qty',dest='slot_qty',type='int',default=168,help='slot quantity')
-    parser.add_option('--bidder-qty',dest='bidder_qty',type='int',default=40,help='bidder quantity')
+    parser.add_option('--bidder-qty',dest='bidder_qty',type='int',default=50,help='bidder quantity')
     parser.add_option('--slot-duration-max',dest='slot_duration_max',type='int',default=120,help='slot maximum duration')
     parser.add_option('--advert-duration-max',dest='advert_duration_max',type='int',default=100,help='advert maximum duration')
     parser.add_option('--advert-price-max',dest='advert_price_max',type='float',default=100.0,help='advert maximum price (per second)')
@@ -303,8 +303,8 @@ if __name__=='__main__':
     
     random_seed = options.random_seed
     draw_results = options.draw_results
-    use_zero_price = options.zero_price
-    use_update_ebpo = options.update_ebpo
+    price_vector = options.price_vector
+    core_algorithm = options.core_algorithm
     
     # set the seed to random in order to get consistent results
     if random_seed: random.seed(random_seed)
@@ -328,8 +328,14 @@ if __name__=='__main__':
     logging.basicConfig(level=log_level)
     
     auction_processor = tvauction.processor.TvAuctionProcessor()
-    tvauction.processor.UPDATE_EBPO = use_update_ebpo
-    if use_zero_price: auction_processor.vcgClass = tvauction.processor.VcgFake
+    
+    if price_vector=='vcg': auction_processor.vcgClass = tvauction.processor.Vcg
+    elif price_vector=='zero': auction_processor.vcgClass = tvauction.processor.Zero
+    
+    if core_algorithm=='trim': auction_processor.core_algorithm = tvauction.processor.CorePricing.TRIM_VALUES
+    elif core_algorithm=='switch': auction_processor.core_algorithm = tvauction.processor.CorePricing.SWITCH_COALITION
+    elif core_algorithm=='update': auction_processor.core_algorithm = tvauction.processor.CorePricing.SWITCH_COALITION_UPDATE_EBPO
+    
     
     results = []
     for distribution in distributions:
@@ -367,33 +373,7 @@ if __name__=='__main__':
         print 'distribution: ', distribution
         print 'solving...'
         
-#        class FakeGwd(tvauction.processor.Gwd):
-#            def generate(self, slots, bidderInfos):
-#                self.bidderInfos = bidderInfos
-#                return super(FakeGwd, self).generate(slots, bidderInfos)
-#            def solve(self,*a):
-#                (solver_status,(revenue_raw, prices_raw, winners)) = super(FakeGwd, self).solve(*a)
-#                lost_winner = list(winners).pop()
-#                winners = winners - {lost_winner}
-#                revenue_raw -= bidderInfos[lost_winner].budget
-#                del prices_raw[lost_winner]
-#                return (solver_status,(revenue_raw, prices_raw, winners))
-        class FakeGwd(tvauction.processor.Gwd):
-            def solve(self,*a):
-                prices_raw = dict([(0, 73920), (2, 567732), (3, 0), (5, 750420), (8, 3146704), (10, 916960), (12, 77865), (17, 1449216), (20, 53298), (21, 296450), (26, 423150), (29, 943712), (31, 3683128), (32, 588240), (38, 1885760)])
-                res = (sum(prices_raw.itervalues()), prices_raw, frozenset(prices_raw.keys()))
-                return (1,res)
-        class FakeVcg(tvauction.processor.Vcg):
-            def solve(self, slots, bidderInfos, revenue_raw, winners, prob_gwd, prob_vars):
-                revenue_vcg = 12086029
-                prices_vcg = dict([(0, 73920), (2, 567732), (3, 0), (5, 750420), (8, 2676384.0), (10, 916960), (12, 77865), (17, 864206.0), (20, 53298), (21, 296450), (26, 423150), (29, 943712), (31, 2820024.0), (32, 279864.0), (38, 1342044.0)])
-                revenues_without_bidders = dict([(0, 15062499.0), (2, 15206327.0), (3, 14856555.0), (5, 15167279.0), (8, 14386235.0), (10, 15167899.0), (12, 15058554.0), (17, 14271545.0), (20, 15250281.0), (21, 15341385.0), (26, 15350909.0), (29, 14898385.0), (31, 13993451.0), (32, 14548179.0), (38, 14312839.0)])
-                return (revenue_vcg, prices_vcg, revenues_without_bidders)
-        auction_processor.gwdClass = FakeGwd
-        auction_processor.vcgClass = FakeVcg
-
-        res = auction_processor.solve(slots, bidderInfos, 5, 1, None)
-#        res = auction_processor.solve(slots, bidderInfos, None, None, None)
+        res = auction_processor.solve(slots, bidderInfos, 5, 10, None)
         
         calc_duration += time.clock()
         print 'duration: %.1f seconds' % calc_duration
