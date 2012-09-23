@@ -1,15 +1,15 @@
 # -*- coding: utf-8; -*-
 
-import sys
-import logging
-
 from collections import namedtuple, defaultdict
-import pulp as pu
-import math
-import random
-
 from pprint import pprint as pp
+import logging
+import math
+import pulp as pu
+import random
+import sys
 
+
+UPDATE_EBPO = True
 SOLVER_MSG = False
 SOLVER_CLASS = pu.GUROBI
 
@@ -66,13 +66,13 @@ class Gwd(object):
         revenue_raw = pu.value(prob.objective)
         prices_raw = dict((w,bidderInfos[w].budget) for w in winners)
         
-        logging.info('raw:\trevenue %d\tprices: %s' % (revenue_raw,sorted(prices_raw.iteritems())))
+        logging.info('raw:\trevenue %d, prices: %s' % (revenue_raw,sorted(prices_raw.iteritems())))
         return (solver_status,(revenue_raw, prices_raw, winners))
     
     def getSlotAssignments(self, winners, x):
         winners_slots = dict((w,[]) for w in winners)
         for slot_id, slot_user_vars in x.iteritems():
-            slot_winners = [user_id for (user_id,has_won) in slot_user_vars.iteritems() if has_won.value() and round(has_won.value()) == 1]
+            slot_winners = [user_id for (user_id,has_won) in slot_user_vars.iteritems() if user_id in winners and has_won.value() and round(has_won.value()) == 1]
             for slot_winner in slot_winners: winners_slots[slot_winner].append(slot_id)
         return winners_slots
     
@@ -126,7 +126,8 @@ class Vcg(object):
             revenues_without_bidders[w] = self.solveStep(prob_vcg, prob_vars, w)
             prices_vcg[w] = self.getPriceForBidder(bidderInfos[w].budget, revenue_raw, revenues_without_bidders[w])
         revenue_vcg = sum(prices_vcg.itervalues())
-        logging.info('vcg:\trevenue %d\tprices: %s' % (revenue_vcg,sorted(prices_vcg.iteritems())))
+        logging.info('vcg:\trevenue %d, prices: %s' % (revenue_vcg,sorted(prices_vcg.iteritems())))
+        logging.info('vcg:\trevenues without bidders: %s' % (sorted(revenues_without_bidders.iteritems()),) )
         return (revenue_vcg, prices_vcg, revenues_without_bidders)
     
     def solveStep(self, prob_vcg, prob_vars, winner_id):
@@ -249,7 +250,7 @@ class CorePricing(object):
             winners_blocking = winners & blocking_coalition
             
             # update the blocking coalitions value
-            revenues_coalitions.append((winners_nonblocking,winners_blocking,revenue_blocking_coalition))
+            revenues_coalitions.append((winners_nonblocking,winners_blocking))
             
             # blocking_y_vals = frozenset(bidder_id for (bidder_id,t_j) in t.iteritems() if round(t_j.value())==1)
             # logging.info('sep:\tblocking y values: %s' % (sorted(blocking_y_vals),))
@@ -286,14 +287,20 @@ class CorePricing(object):
                 # ebpo: add vcg price constraints 
                 for w in blocking_coalition: prob_ebpo += (pi[w]-m <= prices_vcg[w], 'pi_constr_%d' % w)
                 
-                # ebpo: add pi constraints
-                for nr, (bidders_past_nb,bidders_past_b,revenue_past) in enumerate(revenues_coalitions):
-                    winners_past_nb = winners & bidders_past_nb
-                    winners_past_b = winners & bidders_past_b
-                    if winners_past_nb and winners_past_b:
-                        revenue_without_blocking = revenue_past - sum(bidderInfos[wb].budget for wb in winners_past_b)
-                        prob_ebpo += (sum(pi[wnb] for wnb in winners_past_nb) >= revenue_without_blocking,'ebpo_constr_%d' % nr)
-                    # start a new round for the sep (since we recreated the prices_t vector with the vcg values)
+                # ebpo: add pi constraints:
+                # go through all already taken ebpo constraints and add the constraints again
+                # all obsolete bidders. we also have to remove their part of the revenue calculated.
+                if UPDATE_EBPO:
+                    for nr, (winners_past_nb,winners_past_b) in enumerate(revenues_coalitions):
+                        winners_nb_filtered = winners & winners_past_nb
+                        winners_b_filtered = winners & winners_past_b
+                        # only add constraints when the new coalition is somehow involved
+                        if winners_nb_filtered and winners_b_filtered:
+                            # generate the revenue by adding up only the winners that participated
+                            revenue_past = sum(bidderInfos[w].budget for w in winners_b_filtered | winners_nb_filtered)
+                            # add the ebpo constraint
+                            revenue_without_blocking_winners = revenue_past - sum(bidderInfos[wb].budget for wb in winners_b_filtered)
+                            prob_ebpo += (sum(pi[wnb] for wnb in winners_nb_filtered) >= revenue_without_blocking_winners,'ebpo_constr_%d' % nr)
             else:
                 winners_nonblocking = winners - blocking_coalition
                 winners_blocking = winners & blocking_coalition
@@ -302,33 +309,30 @@ class CorePricing(object):
                 
                 # add (iteratively) new constraints to the ebpo problem.
                 # original formulation:
-                # revenue_without_blocking = obj_value_sep - sum(prices_t[wb] for wb in winners_blocking)
+                # revenue_without_blocking_winners = obj_value_sep - sum(prices_t[wb] for wb in winners_blocking)
                 # new formulation:
-                revenue_without_blocking = revenue_blocking_coalition - sum(bidderInfos[wb].budget for wb in winners_blocking)
+                revenue_without_blocking_winners = revenue_blocking_coalition - sum(bidderInfos[wb].budget for wb in winners_blocking)
                 
-                # TRIM_VALUES algorithm: simply trim the revenue_without_blocking (enable the following line)
-                # revenue_without_blocking can be at most the sum of the prices_raw of winners_nonblocking
+                # TRIM_VALUES algorithm: simply trim the revenue_without_blocking_winners (enable the following line)
+                # revenue_without_blocking_winners can be at most the sum of the prices_raw of winners_nonblocking
                 if self.algorithm==self.TRIM_VALUES:
-                    revenue_without_blocking = min(sum(prices_raw[wnb] for wnb in winners_nonblocking), revenue_without_blocking)
+                    revenue_without_blocking_winners = min(sum(prices_raw[wnb] for wnb in winners_nonblocking), revenue_without_blocking_winners)
                 
                 # ebpo: add pi constraints
-                prob_ebpo += (sum(pi[wnb] for wnb in winners_nonblocking) >= revenue_without_blocking, 'ebpo_constr_%d' % cnt)
+                prob_ebpo += (sum(pi[wnb] for wnb in winners_nonblocking) >= revenue_without_blocking_winners, 'ebpo_constr_%d' % cnt)
                 
             # ebpo: solve (this problem can be formulated as a continuous LP).
-            prob_ebpo.writeLP('ebpo.lp')
+            prob_ebpo.writeLP('ebpo_%d.lp' % cnt)
             logging.info('ebpo:\tcalculating - step %s' % (cnt),)
             solver_status = prob_ebpo.solve(ebpo_solver)
             
             # update the π_t list. sum(π_t) has to be equal or increase for each t
-            prices_t = dict((int(b.name[3:]), b.varValue) for b in prob_ebpo.variables() if b.name[:2]=='pi')
+            prices_t = dict((j,pi_j.value() or pi_j.lowBound) for (j,pi_j) in pi.iteritems())
             prices_t_sum, prices_t_sum_last = round(sum(prices_t.itervalues()),2), prices_t_sum
             
-            logging.info('ebpo:\trevenue %d\tprices: %s' % (prices_t_sum,[(k,round(v,2)) for (k,v) in prices_t.iteritems()]))
+            logging.info('ebpo:\trevenue %d, diff: %d' % (prices_t_sum,prices_t_sum-prices_t_sum_last))
             assert solver_status == pu.LpStatusOptimal, 'ebpo: not optimal - %s' % pu.LpStatus[solver_status]
             
-            assert prices_t_sum >= prices_t_sum_last, 'ebpo: decrease between steps'
-
-#            assert revenue_without_blocking_check == revenue_without_blocking_check_2, ("no: %s %s" % (revenue_without_blocking_check,revenue_without_blocking_check_2))
             # update step_info
             step_info.append({'blocking_coalition':revenue_blocking_coalition,'ebpo':prices_t_sum,'sep':obj_value_sep})
             
@@ -342,7 +346,7 @@ class CorePricing(object):
         
         # there is no blocking coalition -> the current iteration of the ebpo contains core prices
         revenue_core = sum(prices_t.itervalues())
-        logging.info('core:\trevenue %d\tprices: %s' % (revenue_core,[(k,round(v,2)) for (k,v) in prices_t.iteritems()]))
+        logging.info('core:\trevenue %d, prices: %s' % (revenue_core,[(k,round(v,2)) for (k,v) in prices_t.iteritems()]))
         return (revenue_core, prices_t, prices_raw, prices_vcg, winners_slots, step_info)
 
 class TvAuctionProcessor(object):

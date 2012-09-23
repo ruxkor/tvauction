@@ -2,28 +2,30 @@
 # -*- coding: utf-8; -*-
 # simulation 
 
-
+import os
+import sys
 import random
+import datetime
 import time
-import numpy as np
-from scipy import stats
-from pprint import pprint as pp
-
-import processor_pulp
 import logging
 
+import numpy as np
+from scipy import stats
 import matplotlib.pyplot as plt
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
+import tvauction.processor
+
+from pprint import pprint as pp
 
 FIXED = 0
 LINEAR = 1
-
 CONSTANT = 1
 NORMAL = 2
 UNIFORM = 3
 
 #FIXED = 'fixed'
 #LINEAR = 'linear'
-#
 #CONSTANT = 'constant'
 #NORMAL = 'normal'
 #UNIFORM = 'uniform'
@@ -252,8 +254,6 @@ def drawResult(file_prefix, res):
     fig.savefig(file_prefix+'_2.pdf')
     
 if __name__=='__main__':
-    import os
-    import sys
     import optparse
     import json
     
@@ -261,9 +261,10 @@ if __name__=='__main__':
         setattr(parser.values,opt.dest,json.loads(value))
     parser = optparse.OptionParser()
     parser.add_option('--random-seed',dest='random_seed',type='int',default=1,help='random seed')
-    parser.add_option('--zero-price-vector',dest='zero_price',action='store_true',default=False,help='don\'t calculate the vcg prices. use a 0 price vector instead')
+    parser.add_option('--zero-price',dest='zero_price',action='store_true',default=False,help='don\'t calculate the vcg prices. use a 0 price vector instead')
+    parser.add_option('--no-update-ebpo',dest='update_ebpo',action='store_false',default=True,help='don\'t calculate the vcg prices. use a 0 price vector instead')
     parser.add_option('--no-draw',dest='draw_results',action='store_false',default=True,help='draw graph depicting the allocation and the process')
-    parser.add_option('--slot-qty',dest='slot_qty',type='int',default=20,help='slot quantity')
+    parser.add_option('--slot-qty',dest='slot_qty',type='int',default=168,help='slot quantity')
     parser.add_option('--bidder-qty',dest='bidder_qty',type='int',default=40,help='bidder quantity')
     parser.add_option('--slot-duration-max',dest='slot_duration_max',type='int',default=120,help='slot maximum duration')
     parser.add_option('--advert-duration-max',dest='advert_duration_max',type='int',default=100,help='advert maximum duration')
@@ -303,50 +304,10 @@ if __name__=='__main__':
     random_seed = options.random_seed
     draw_results = options.draw_results
     use_zero_price = options.zero_price
+    use_update_ebpo = options.update_ebpo
     
     # set the seed to random in order to get consistent results
     if random_seed: random.seed(random_seed)
-    
-    # 1.    define quantities
-    #        - slot quantity (int)
-    #        - bidder quantity (int)
-    #        - slot maximum duration (int)
-    #        - slot price (per second), in steps (list[float])
-    #        - advert maximum duration (int)
-    #        - advert maximum price (per second), float
-    #        - campaign minimum priority vector sum ranges (min/max, as percent), (int,int)
-    # 2.    define reserve price distribution
-    #        - constant: all slots have the same price per second
-    #        - normal: the prices are normally distributed
-    #        - uniform: the prices are uniformly distributed
-    # 3.    define bidding behavior
-    # 3.1.    - define distribution between priorities
-    #            - constant: all bidders will have the same priority vector
-    #            - normal: the differences in the priority vector will be normally distributed
-    #            - uniform: the differences in the priority vector will be uniformly distributed
-    # 3.2    - define relation between reserve price and priority vector
-    #            - fixed: there is no correlation between the reserve price and the priority vector
-    #            - linear: there is a linear correlation between the reserve price and the priority vector
-    # 4.    define slot duration distribution
-    #        - constant
-    #        - normal
-    #        - uniform
-    # 5.    define advert duration distribution
-    #        - constant
-    #        - normal
-    #        - uniform
-    # 6.    define advert price (per second) distribution
-    #        - constant
-    #        - normal
-    #        - uniform
-    # 7.    define the minimum priority vector sum (as a fraction) distribution
-    #        - constant
-    #        - normal
-    #        - uniform
-    #
-    # note:
-    #    the final campaign price will be calculated using the following formula for each bidder:
-    
     
     slot_durations, slot_prices, priority_bidders, advert_durations, advert_prices, campaign_min_prio_sum = \
         generate(
@@ -366,18 +327,16 @@ if __name__=='__main__':
     
     logging.basicConfig(level=log_level)
     
-    auction_processor = processor_pulp.TvAuctionProcessor()
-    if use_zero_price: auction_processor.vcgClass = processor_pulp.VcgFake
+    auction_processor = tvauction.processor.TvAuctionProcessor()
+    tvauction.processor.UPDATE_EBPO = use_update_ebpo
+    if use_zero_price: auction_processor.vcgClass = tvauction.processor.VcgFake
     
     results = []
     for distribution in distributions:
         d_slot_duration, d_ad_duration, d_slot_price, d_bid_price, d_min_prio, d_inter_prio, d_prio_to_price = distribution
         # generate slot objects
-        # generate campaign prices
-        # generate bidderInfo object
-        # solve!
         slots = dict(
-            (slot_id,processor_pulp.Slot(
+            (slot_id,tvauction.processor.Slot(
                 id=slot_id,
                 price=slot_prices[d_slot_price][slot_id],
                 length=slot_durations[d_slot_duration][slot_id]
@@ -385,6 +344,8 @@ if __name__=='__main__':
             for slot_id in xrange(slot_qty)
         )
         
+        # generate bidderInfo objects
+        # 
         # campaign prices are defined as follows:
         # bidder_attrib_min = Σ(bidder_prio_values) * campaign_prio_sum / 100
         # campaign_budget = advert_price * ad_duration * bidder_attrib_min
@@ -393,7 +354,7 @@ if __name__=='__main__':
             bidder_prio_values = dict(enumerate(priority_bidders[bidder_id][d_inter_prio][d_prio_to_price][d_slot_price]))
             bidder_ad_duration = advert_durations[bidder_id][d_ad_duration]
             bidder_attrib_min = int(sum(bidder_prio_values.itervalues()) * campaign_min_prio_sum[bidder_id][d_min_prio] / 100)
-            bidderInfos[bidder_id] = processor_pulp.BidderInfo(
+            bidderInfos[bidder_id] = tvauction.processor.BidderInfo(
                 id=bidder_id,
                 budget=advert_prices[bidder_id][d_bid_price] * bidder_ad_duration * bidder_attrib_min,
                 length=bidder_ad_duration,
@@ -406,17 +367,44 @@ if __name__=='__main__':
         print 'distribution: ', distribution
         print 'solving...'
         
-#        res = auction_processor.solve(slots, bidderInfos, 5, 1, None)
-        res = auction_processor.solve(slots, bidderInfos, None, None, None)
+#        class FakeGwd(tvauction.processor.Gwd):
+#            def generate(self, slots, bidderInfos):
+#                self.bidderInfos = bidderInfos
+#                return super(FakeGwd, self).generate(slots, bidderInfos)
+#            def solve(self,*a):
+#                (solver_status,(revenue_raw, prices_raw, winners)) = super(FakeGwd, self).solve(*a)
+#                lost_winner = list(winners).pop()
+#                winners = winners - {lost_winner}
+#                revenue_raw -= bidderInfos[lost_winner].budget
+#                del prices_raw[lost_winner]
+#                return (solver_status,(revenue_raw, prices_raw, winners))
+        class FakeGwd(tvauction.processor.Gwd):
+            def solve(self,*a):
+                prices_raw = dict([(0, 73920), (2, 567732), (3, 0), (5, 750420), (8, 3146704), (10, 916960), (12, 77865), (17, 1449216), (20, 53298), (21, 296450), (26, 423150), (29, 943712), (31, 3683128), (32, 588240), (38, 1885760)])
+                res = (sum(prices_raw.itervalues()), prices_raw, frozenset(prices_raw.keys()))
+                return (1,res)
+        class FakeVcg(tvauction.processor.Vcg):
+            def solve(self, slots, bidderInfos, revenue_raw, winners, prob_gwd, prob_vars):
+                revenue_vcg = 12086029
+                prices_vcg = dict([(0, 73920), (2, 567732), (3, 0), (5, 750420), (8, 2676384.0), (10, 916960), (12, 77865), (17, 864206.0), (20, 53298), (21, 296450), (26, 423150), (29, 943712), (31, 2820024.0), (32, 279864.0), (38, 1342044.0)])
+                revenues_without_bidders = dict([(0, 15062499.0), (2, 15206327.0), (3, 14856555.0), (5, 15167279.0), (8, 14386235.0), (10, 15167899.0), (12, 15058554.0), (17, 14271545.0), (20, 15250281.0), (21, 15341385.0), (26, 15350909.0), (29, 14898385.0), (31, 13993451.0), (32, 14548179.0), (38, 14312839.0)])
+                return (revenue_vcg, prices_vcg, revenues_without_bidders)
+        auction_processor.gwdClass = FakeGwd
+        auction_processor.vcgClass = FakeVcg
+
+        res = auction_processor.solve(slots, bidderInfos, 5, 1, None)
+#        res = auction_processor.solve(slots, bidderInfos, None, None, None)
         
         calc_duration += time.clock()
         print 'duration: %.1f seconds' % calc_duration
         
         print 'revenues:'
-        for what in ('raw','vcg','core','final'): print '  %s\t%d' % (what, sum(res['prices_%s' % what].itervalues()))
+        for what in ('raw','vcg','core','final'): 
+            print '  %s\t%d' % (what, sum(res['prices_%s' % what].itervalues()))
         
         if draw_results:
-            now = '' # datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')
-            drawResult('/tmp/tvauction_simulation_%s_%s' % (now,''.join(map(str,distribution))), res)
+            if not os.path.exists('/tmp/tvauction'): os.makedirs('/tmp/tvauction')
+            now = datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')
+            drawResult('/tmp/tvauction/simulation_%s_%s' % (now,''.join(map(str,distribution))), res)
             
         results.append(res)
