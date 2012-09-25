@@ -261,8 +261,8 @@ if __name__=='__main__':
     parser = optparse.OptionParser()
     parser.add_option('--random-seed',dest='random_seed',type='int',default=1,help='random seed')
     parser.add_option('--initial-vector',dest='price_vector',choices=('vcg','zero'),default='vcg',help='the type of price vector used as a starting point for core price generation (vcg,zero)')
-    parser.add_option('--core-algorithm',dest='core_algorithm',choices=('trim','switch','update'),default='update',help='which algorithm should be used in case a suboptimal winner determination is discovered during core pricing (trim: trim the values to be within a feasible region, switch: recreate the ebpo,update: recreate the ebpo and try to re-use already existing constraints)')
-    parser.add_option('--no-draw',dest='draw_results',action='store_false',default=True,help='draw graph depicting the allocation and the process')
+    parser.add_option('--core-algorithm',dest='core_algorithm',choices=('trim','switch','reuse'),default='reuse',help='which algorithm should be used in case a suboptimal winner determination is discovered during core pricing (trim: trim the values to be within a feasible region, switch: recreate the ebpo,reuse: recreate the ebpo and try to re-use already existing constraints)')
+    parser.add_option('--no-draw',dest='draw_results',action='store_false',default=True,help='draw graphs illustrating the allocation and the process')
     parser.add_option('--slot-qty',dest='slot_qty',type='int',default=20,help='slot quantity')
     parser.add_option('--bidder-qty',dest='bidder_qty',type='int',default=40,help='bidder quantity')
     parser.add_option('--slot-duration-max',dest='slot_duration_max',type='int',default=120,help='slot maximum duration')
@@ -334,9 +334,8 @@ if __name__=='__main__':
     elif price_vector=='zero': auction_processor.vcgClass = tvauction.processor.Zero
     
     if core_algorithm=='trim': auction_processor.core_algorithm = tvauction.processor.CorePricing.TRIM_VALUES
-    elif core_algorithm=='switch': auction_processor.core_algorithm = tvauction.processor.CorePricing.REUSE_COALITIONS
-    elif core_algorithm=='update': auction_processor.core_algorithm = tvauction.processor.CorePricing.SWITCH_COALITIONS
-    
+    elif core_algorithm=='switch': auction_processor.core_algorithm = tvauction.processor.CorePricing.SWITCH_COALITIONS
+    elif core_algorithm=='reuse': auction_processor.core_algorithm = tvauction.processor.CorePricing.REUSE_COALITIONS
     
     results = []
     for distribution in distributions:

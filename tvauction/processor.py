@@ -147,6 +147,7 @@ class CorePricing(object):
     TRIM_VALUES=1
     SWITCH_COALITIONS=2
     REUSE_COALITIONS=3
+
     
     def __init__(self, gwd, vcg, algorithm=REUSE_COALITIONS):
         self.gwd = gwd
@@ -158,29 +159,39 @@ class CorePricing(object):
         # make a copy of prob_gwd, since we are using it as basis
         prob_sep = prob_gwd.deepcopy()
         prob_sep.name = name
+        
         # build sep t variable and modify objective
         t = dict((w,pu.LpVariable('t_%d' % (w,), cat=pu.LpBinary)) for w in winners)
         prob_sep.objective -= sum((bidderInfos[w].budget-prices_t[w])*t[w] for w in winners)
+        
         # add all sep constraints, setting y_i <= t_i
         for w in winners: prob_sep += y[w] <= t[w]
         return prob_sep
+    
     
     def _createEbpo(self, name, winners, bidderInfos, coalitions, prices_vcg):
         # init ebpo
         prob_ebpo = pu.LpProblem('ebpo',pu.LpMinimize)
         prob_ebpo.name = name
+        
         # constants: ε (should be 'small enough')
         epsilon = 1e-31
+        
         # variables: m, π_j 
         m = pu.LpVariable('m',cat=pu.LpContinuous)
         pi = dict((w,pu.LpVariable('pi_%d' % (w,), cat=pu.LpContinuous, lowBound=prices_vcg[w], upBound=bidderInfos[w].budget)) for w in winners)
+        
         # add objective function
         prob_ebpo += sum(pi.itervalues()) + epsilon*m
+        
         # add pi constraints
         for w in winners: prob_ebpo += (pi[w]-m <= prices_vcg[w], 'pi_constr_%d' % w)
-        # add coalition constraints for all coalitions without the winning coalition TODO only to it if updating
-        for c in coalitions-{winners}: prob_ebpo += sum(pi[wnb] for wnb in winners-c) >= sum(bidderInfos[j].budget for j in c-winners)
+        
+        # add coalition constraints for all coalitions without the winning coalition
+        if self.algorithm==self.REUSE_COALITIONS:
+            for c in coalitions-{winners}: prob_ebpo += sum(pi[wnb] for wnb in winners-c) >= sum(bidderInfos[j].budget for j in c-winners)
         return (prob_ebpo, pi)
+    
     
     def _updateToBestCoalition(self, coalitions, winners_without_bidders, current_coalition, bidderInfos, prob_vcg, prob_vars):
         '''iteratively update to the best coalition, generating new coalitions while getting vcg coalitions on the way.
@@ -197,9 +208,11 @@ class CorePricing(object):
             coalitions.update(winners_without_bidders.itervalues())
         return coalition_changed, best_coalition
     
+    
     @staticmethod
     def _getBestCoalition(coalitions, bidderInfos):
         return max(coalitions,key=lambda c: sum(bidderInfos[j].budget for j in c))
+
     
     def solve(self, prob_gwd, bidderInfos, winners, winners_without_bidders, prob_vars):
         # init coalition
@@ -261,12 +274,18 @@ class CorePricing(object):
             coalitions.add(blocking_coalition)
             
             # if the added coalition is better than the currently winning coalition, get all new vcg coalitions and repeat
-            winners_changed, winners = self._updateToBestCoalition(coalitions, winners_without_bidders, winners, bidderInfos, prob_vcg, prob_vars)
+            if self.algorithm in (self.SWITCH_COALITIONS,self.REUSE_COALITIONS):
+                winners_changed, winners = self._updateToBestCoalition(coalitions, winners_without_bidders, winners, bidderInfos, prob_vcg, prob_vars)
             
-            if prob_ebpo is None or winners_changed:
+            if prob_ebpo is None or self.algorithm in (self.SWITCH_COALITIONS,self.REUSE_COALITIONS) and winners_changed:
                 revenue_raw = sum(bidderInfos[w].budget for w in winners)
                 prices_vcg = self.vcg.getPricesForBidders(bidderInfos, revenue_raw, winners, winners_without_bidders)
                 prob_ebpo, pi = self._createEbpo('ebpo_%d' % cnt, winners, bidderInfos, coalitions, prices_vcg)
+            elif self.algorithm==self.TRIM_VALUES:
+                prob_ebpo += sum(pi[wnb] for wnb in winners-blocking_coalition) >= min(
+                    sum(bidderInfos[j].budget for j in blocking_coalition-winners), # original right-hand side of constraint 
+                    sum(bidderInfos[j].budget for j in winners-blocking_coalition)  # can be at most b_j forall j in W\C^t
+                )
             else:
                 prob_ebpo += sum(pi[wnb] for wnb in winners-blocking_coalition) >= sum(bidderInfos[j].budget for j in blocking_coalition-winners)
                 
