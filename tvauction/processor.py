@@ -89,10 +89,6 @@ class ReservePrice(object):
         revenue_after = sum(prices_after.itervalues())
         return (revenue_after,prices_after)
 
-#
-# TODO: use the epgap to raise the revenue_without_bidder (so vcg price gets lower)
-# if not, we risk too high vcg prices which could cause infeasibilities!
-#
 class InitialPricing(object):
     def __init__(self, gwd):
         self.gwd = gwd
@@ -231,7 +227,8 @@ class CorePricing(object):
         coalitions.update(winners_without_bidders.itervalues())
         
         # get currently highest valued coalition
-        _coalition_changed, winners = self._updateToBestCoalition(coalitions, winners_without_bidders, winners, bidderInfos, prob_vcg, prob_vars)        
+        if self.algorithm in (self.REUSE_COALITIONS,self.SWITCH_COALITIONS):
+            _coalition_changed, winners = self._updateToBestCoalition(coalitions, winners_without_bidders, winners, bidderInfos, prob_vcg, prob_vars)        
         revenue_raw = sum(bidderInfos[w].budget for w in winners)
         
         # init prices_vcg and prices_t
@@ -358,8 +355,7 @@ class TvAuctionProcessor(object):
         
         # re-solve the gwd to get the slot assignments (this is ok, since we pre-seed the prob with constraints)
         if winners_core != winners:
-            for wc in winners_core: prob_gwd += y[wc] == 1
-            gwd.solver.epgap = epgap
+            for wc in winners_core: prob_gwd.addConstraint(y[wc] == 1,'forcewin_%d' % wc)
             gwd.solver.timeLimit = timeLimitGwd
             _solver_status, (revenue_raw, prices_raw, winners) = gwd.solve(prob_gwd, bidderInfos, prob_vars)
             
