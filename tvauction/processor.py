@@ -161,7 +161,6 @@ class CorePricing(object):
         # build sep t variable and modify objective
         t = dict((w,pu.LpVariable('t_%d' % (w,), cat=pu.LpBinary)) for w in winners)
         prob_sep.objective -= sum((bidderInfos[w].budget-prices_t[w])*t[w] for w in winners)
-        
         # add all sep constraints, setting y_i <= t_i
         for w in winners: prob_sep += y[w] <= t[w]
         return prob_sep
@@ -172,17 +171,15 @@ class CorePricing(object):
         prob_ebpo.name = name
         # constants: ε (should be 'small enough')
         epsilon = 1e-31
-        
         # variables: m, π_j 
         m = pu.LpVariable('m',cat=pu.LpContinuous)
         pi = dict((w,pu.LpVariable('pi_%d' % (w,), cat=pu.LpContinuous, lowBound=prices_vcg[w], upBound=bidderInfos[w].budget)) for w in winners)
-        
         # add objective function
         prob_ebpo += sum(pi.itervalues()) + epsilon*m
-        
+        # add pi constraints
+        for w in winners: prob_ebpo += (pi[w]-m <= prices_vcg[w], 'pi_constr_%d' % w)
         # add coalition constraints for all coalitions without the winning coalition TODO only to it if updating
-        for coalition in coalitions-{winners}:
-            prob_ebpo += sum(pi[wnb] for wnb in winners-coalition) >= sum(bidderInfos[j].budget for j in coalition-winners)
+        for c in coalitions-{winners}: prob_ebpo += sum(pi[wnb] for wnb in winners-c) >= sum(bidderInfos[j].budget for j in c-winners)
         return (prob_ebpo, pi)
     
     def _updateToBestCoalition(self, coalitions, winners_without_bidders, current_coalition, bidderInfos, prob_vcg, prob_vars):
@@ -231,7 +228,8 @@ class CorePricing(object):
         # initialize obj_value_sep and prices_t_sum vars, used for comparisons
         obj_value_sep = obj_value_sep_last = 0
         prices_t_sum = prices_t_sum_last = sum(prices_t.itervalues())
-
+        blocking_coalition = blocking_coalition_last = None
+        
         # store information about the steps (in order to get insights / draw graphs of the process)
         step_info = [{'raw':revenue_raw,'vcg':sum(prices_vcg.itervalues())}]
         
@@ -257,7 +255,7 @@ class CorePricing(object):
                 break
             
             # get the blocking coalition
-            blocking_coalition = frozenset(bidder_id for (bidder_id,y_j) in y.iteritems() if round(y_j.value())==1)
+            blocking_coalition, blocking_coalition_last = frozenset(bidder_id for (bidder_id,y_j) in y.iteritems() if round(y_j.value())==1), blocking_coalition
             logging.info('sep:\tvalue: %d, blocking: %s' % (obj_value_sep, sorted(blocking_coalition),))
             # and add it to the list of coalitions
             coalitions.add(blocking_coalition)
@@ -287,7 +285,7 @@ class CorePricing(object):
             
             # if both z(π^t) == z(π^t-1) and θ^t == θ^t-1, we are in a local optimum we cannot escape
             # proposition: this happens when the gwd returned a suboptimal solution, causing a winner allocation.
-            if obj_value_sep == obj_value_sep_last and prices_t_sum == prices_t_sum_last:
+            if obj_value_sep == obj_value_sep_last and prices_t_sum == prices_t_sum_last and blocking_coalition == blocking_coalition_last:
                 logging.warn('core:\tvalue did not change. aborting.') 
                 break
         else:
