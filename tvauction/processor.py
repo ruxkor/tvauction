@@ -17,42 +17,42 @@ BidderInfo = namedtuple('BidderInfo', ('id','budget','length','attrib_min','attr
 
 class Gwd(object):
     '''general winner determination'''
-    def __init__(self, slots, bidderInfos):
+    def __init__(self, slots, bidder_infos):
         self.slots = slots
-        self.bidderInfos = bidderInfos
+        self.bidder_infos = bidder_infos
         self.solver = SOLVER_CLASS(msg=SOLVER_MSG)
         
     def generate(self):
         '''the winner determination, implemented as a multiple knapsack problem'''
-        slots, bidderInfos = self.slots, self.bidderInfos
+        slots, bidder_infos = self.slots, self.bidder_infos
         
         # x determines whether a bidder can air in a certain slot
-        x = pu.LpVariable.dicts('x', (slots.keys(),bidderInfos.keys()), cat=pu.LpBinary)
+        x = pu.LpVariable.dicts('x', (slots.keys(),bidder_infos.keys()), cat=pu.LpBinary)
         # y determines whether a winner has won
-        y = pu.LpVariable.dicts('y', (bidderInfos.keys(),), cat=pu.LpBinary)
+        y = pu.LpVariable.dicts('y', (bidder_infos.keys(),), cat=pu.LpBinary)
         # initialize constraints
         cons = []
         # the sum of all assigned ad lengths has to be at most the length of the slot
         for (i,slot) in slots.iteritems():
-            f = sum(bidderInfo.length*x[i][j] for (j,bidderInfo) in bidderInfos.iteritems())
+            f = sum(bidder_info.length*x[i][j] for (j,bidder_info) in bidder_infos.iteritems())
             cons.append( (f <= slot.length , 'slotlen_constr_%d' % i) )
         # match the bidders' demands regarding their attributes
         # attrib_values has to be a list with the same length
         # as the slots list
-        for (j,bidderInfo) in bidderInfos.iteritems():
-            assert len(slots) == len(bidderInfo.attrib_values)
-            M = sum(bidderInfo.attrib_values.itervalues())+1
-            f = sum(attrib_value*x[i][j] for (i,attrib_value) in bidderInfo.attrib_values.iteritems())
-            f2 = bidderInfo.attrib_min - f
+        for (j,bidder_info) in bidder_infos.iteritems():
+            assert len(slots) == len(bidder_info.attrib_values)
+            M = sum(bidder_info.attrib_values.itervalues())+1
+            f = sum(attrib_value*x[i][j] for (i,attrib_value) in bidder_info.attrib_values.iteritems())
+            f2 = bidder_info.attrib_min - f
             cons.append( (f <= M*y[j], 'M_constr_%d.1' % j) )
             cons.append( (f2 <= M*(1-y[j]), 'M_constr_%d.2' % j) )
         # user can at most spend the maximum price
-        for (j,bidderInfo) in bidderInfos.iteritems():
-            f = sum(bidderInfo.length*slot.price*x[i][j] for (i,slot) in slots.iteritems())
-            cons.append( (f <= bidderInfo.budget, 'budget_constr_%d' % j) )
+        for (j,bidder_info) in bidder_infos.iteritems():
+            f = sum(bidder_info.length*slot.price*x[i][j] for (i,slot) in slots.iteritems())
+            cons.append( (f <= bidder_info.budget, 'budget_constr_%d' % j) )
         # oovar domain=bool takes already care of min and max bounds
         prob = pu.LpProblem('gwd', pu.LpMaximize)
-        prob += sum(bidderInfo.budget*y[j] for (j,bidderInfo) in bidderInfos.iteritems())
+        prob += sum(bidder_info.budget*y[j] for (j,bidder_info) in bidder_infos.iteritems())
         # add constraints to problem
         for con in cons: prob += con
         return (prob, (x,y,cons))
@@ -66,7 +66,7 @@ class Gwd(object):
         winners = frozenset(j for (j,y_j) in y.iteritems() if round(y_j.value())==1)
         
         revenue_raw = pu.value(prob.objective)
-        prices_raw = dict((w,self.bidderInfos[w].budget) for w in winners)
+        prices_raw = dict((w,self.bidder_infos[w].budget) for w in winners)
         
         logging.info('raw:\trevenue %d, prices: %s' % (revenue_raw,sorted(prices_raw.iteritems())))
         return (solver_status,(revenue_raw, prices_raw, winners))
@@ -79,7 +79,7 @@ class Gwd(object):
         return winners_slots
     
     def getCoalitionValue(self, coalition):
-        return sum(self.bidderInfos[j].budget for j in coalition)
+        return sum(self.bidder_infos[j].budget for j in coalition)
     
     
     
@@ -89,11 +89,11 @@ class ReservePrice(object):
     '''checks if all winners have to pay at least the reserve price.
     if this is not the case, their price is changed accordingly'''
     def solve(self, winners_slots, prices_before):
-        slots, bidderInfos = self.gwd.slots, self.gwd.bidderInfos
+        slots, bidder_infos = self.gwd.slots, self.gwd.bidder_infos
         prices_after = {}
         for w,slot_ids_won in winners_slots.iteritems():
-            bidderInfo = bidderInfos[w]
-            price_reserve = sum(slots[slot_id].price for slot_id in slot_ids_won)*bidderInfo.length
+            bidder_info = bidder_infos[w]
+            price_reserve = sum(slots[slot_id].price for slot_id in slot_ids_won)*bidder_info.length
             prices_after[w] = max(price_reserve, prices_before[w])
         revenue_after = sum(prices_after.itervalues())
         return (revenue_after,prices_after)
@@ -111,11 +111,11 @@ class InitialPricing(object):
         return winners_without_bidders
         
     def getPricesForBidders(self, revenue_raw, winners, winners_without_bidders):
-        bidderInfos = self.gwd.bidderInfos
+        bidder_infos = self.gwd.bidder_infos
         res = {}
         for w in winners:
-            revenue_without_bidder = sum(bidderInfos[wo].budget for wo in winners_without_bidders[w])
-            res[w] = self.getPriceForBidder(bidderInfos[w].budget, revenue_raw, revenue_without_bidder)
+            revenue_without_bidder = sum(bidder_infos[wo].budget for wo in winners_without_bidders[w])
+            res[w] = self.getPriceForBidder(bidder_infos[w].budget, revenue_raw, revenue_without_bidder)
         return res
         
 class Zero(InitialPricing):
@@ -168,7 +168,7 @@ class CorePricing(object):
         
         # build sep t variable and modify objective
         t = dict((w,pu.LpVariable('t_%d' % (w,), cat=pu.LpBinary)) for w in winners)
-        prob_sep.objective -= sum((self.gwd.bidderInfos[w].budget-prices_t[w])*t[w] for w in winners)
+        prob_sep.objective -= sum((self.gwd.bidder_infos[w].budget-prices_t[w])*t[w] for w in winners)
         
         # add all sep constraints, setting y_i <= t_i
         for w in winners: prob_sep += y[w] <= t[w]
@@ -185,7 +185,7 @@ class CorePricing(object):
         
         # variables: m, π_j 
         m = pu.LpVariable('m',cat=pu.LpContinuous)
-        pi = dict((w,pu.LpVariable('pi_%d' % (w,), cat=pu.LpContinuous, lowBound=prices_vcg[w], upBound=self.gwd.bidderInfos[w].budget)) for w in winners)
+        pi = dict((w,pu.LpVariable('pi_%d' % (w,), cat=pu.LpContinuous, lowBound=prices_vcg[w], upBound=self.gwd.bidder_infos[w].budget)) for w in winners)
         
         # add objective function
         prob_ebpo += sum(pi.itervalues()) + epsilon*m
@@ -195,7 +195,7 @@ class CorePricing(object):
         
         # add coalition constraints for all coalitions without the winning coalition
         if self.algorithm==self.REUSE_COALITIONS:
-            for c in coalitions-{winners}: prob_ebpo += sum(pi[wnb] for wnb in winners-c) >= sum(bidderInfos[j].budget for j in c-winners)
+            for c in coalitions-{winners}: prob_ebpo += sum(pi[wnb] for wnb in winners-c) >= sum(bidder_infos[j].budget for j in c-winners)
         return (prob_ebpo, pi)
     
     
@@ -221,7 +221,7 @@ class CorePricing(object):
     def solve(self, prob_gwd, winners, winners_without_bidders, prob_vars):
         
         coalitions = set()
-        bidderInfos = self.gwd.bidderInfos
+        bidder_infos = self.gwd.bidder_infos
         
         # we need a prob_vcg because of the generation of vcg prices for new coalition entries
         prob_vcg = prob_gwd.copy()
@@ -284,16 +284,16 @@ class CorePricing(object):
                 winners_changed, winners = self._updateToBestCoalition(coalitions, winners_without_bidders, winners, prob_vcg, prob_vars)
             
             if prob_ebpo is None or self.algorithm in (self.SWITCH_COALITIONS,self.REUSE_COALITIONS) and winners_changed:
-                revenue_raw = sum(bidderInfos[w].budget for w in winners)
+                revenue_raw = sum(bidder_infos[w].budget for w in winners)
                 prices_vcg = self.vcg.getPricesForBidders(revenue_raw, winners, winners_without_bidders)
                 prob_ebpo, pi = self._createEbpo('ebpo_%d' % cnt, winners, coalitions, prices_vcg)
             elif self.algorithm==self.TRIM_VALUES:
                 prob_ebpo += sum(pi[wnb] for wnb in winners-blocking_coalition) >= min(
-                    sum(bidderInfos[j].budget for j in blocking_coalition-winners), # original right-hand side of constraint 
-                    sum(bidderInfos[j].budget for j in winners-blocking_coalition)  # can be at most b_j forall j in W\C^t
+                    sum(bidder_infos[j].budget for j in blocking_coalition-winners), # original right-hand side of constraint 
+                    sum(bidder_infos[j].budget for j in winners-blocking_coalition)  # can be at most b_j forall j in W\C^t
                 )
             else:
-                prob_ebpo += sum(pi[wnb] for wnb in winners-blocking_coalition) >= sum(bidderInfos[j].budget for j in blocking_coalition-winners)
+                prob_ebpo += sum(pi[wnb] for wnb in winners-blocking_coalition) >= sum(bidder_infos[j].budget for j in blocking_coalition-winners)
                 
             # ebpo: solve (this problem can be formulated as a continuous LP).
             logging.info('ebpo:\tcalculating - step %s' % (cnt),)
@@ -331,17 +331,17 @@ class TvAuctionProcessor(object):
     def isOptimal(self,solver_status):
         return solver_status == pu.LpStatusOptimal
     
-    def solve(self, slots, bidderInfos, timeLimit=20, timeLimitGwd=20, epgap=None):
+    def solve(self, slots, bidder_infos, timeLimit=20, timeLimitGwd=20, epgap=None):
         '''solve the wdp and pricing problem.
         
         @param slots:        a dict of Slot objects
-        @param bidderInfos:  a dict of BidderInfo objects
+        @param bidder_infos:  a dict of BidderInfo objects
         @param timeLimit:    int|null, sets the time limit for all integer problems.
         @param timeLimitGwd: int|null, lets you override the time limit for the gwd because of its importance. 
         @param epgap:        float|null, is used for all integer problems.'''
         
         # generate the gwd    
-        gwd = self.gwdClass(slots, bidderInfos)
+        gwd = self.gwdClass(slots, bidder_infos)
         prob_gwd, prob_vars = gwd.generate()
         x, y, _cons = prob_vars
         
@@ -402,14 +402,14 @@ if __name__ == '__main__':
     
     logging.basicConfig(level=numeric_level)
     
-    slots_imported, bidderInfos_imported = json.loads(options.scenario)
+    slots_imported, bidder_infos_imported = json.loads(options.scenario)
     slots = dict( (s['id'],Slot(**s)) for s in slots_imported.itervalues() )
-    bidderInfos = dict( (b['id'],BidderInfo(**b)) for b in bidderInfos_imported.itervalues() )
-    for bidderInfo in bidderInfos.itervalues():
-        attrib_values = bidderInfo.attrib_values
+    bidder_infos = dict( (b['id'],BidderInfo(**b)) for b in bidder_infos_imported.itervalues() )
+    for bidder_info in bidder_infos.itervalues():
+        attrib_values = bidder_info.attrib_values
         for av in attrib_values.keys():
             attrib_values[int(av)] = attrib_values.pop(av)
     proc = TvAuctionProcessor()
-    res = proc.solve(slots, bidderInfos)
+    res = proc.solve(slots, bidder_infos)
 
     print json.dumps(res,indent=2)    
