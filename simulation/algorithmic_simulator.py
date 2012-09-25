@@ -245,7 +245,6 @@ def drawResult(file_prefix, res):
                     values_what.append(value_prev)
             steps_what.append(step_what)
             values_what.append(value_what if value_what is not None else value_prev)
-        
         ax2.plot(steps_what, values_what, '.', drawstyle='steps-post',label=what,linestyle='-', linewidth=2.0, markersize=10.0)
     
     
@@ -261,11 +260,11 @@ if __name__=='__main__':
         setattr(parser.values,opt.dest,json.loads(value))
     parser = optparse.OptionParser()
     parser.add_option('--random-seed',dest='random_seed',type='int',default=1,help='random seed')
-    parser.add_option('--initial-price-vector',dest='price_vector',choices=('vcg','zero'),default='vcg',help='the type of price vector used as a starting point for core price generation (vcg,zero)')
+    parser.add_option('--initial-vector',dest='price_vector',choices=('vcg','zero'),default='vcg',help='the type of price vector used as a starting point for core price generation (vcg,zero)')
     parser.add_option('--core-algorithm',dest='core_algorithm',choices=('trim','switch','update'),default='update',help='which algorithm should be used in case a suboptimal winner determination is discovered during core pricing (trim: trim the values to be within a feasible region, switch: recreate the ebpo,update: recreate the ebpo and try to re-use already existing constraints)')
     parser.add_option('--no-draw',dest='draw_results',action='store_false',default=True,help='draw graph depicting the allocation and the process')
-    parser.add_option('--slot-qty',dest='slot_qty',type='int',default=168,help='slot quantity')
-    parser.add_option('--bidder-qty',dest='bidder_qty',type='int',default=50,help='bidder quantity')
+    parser.add_option('--slot-qty',dest='slot_qty',type='int',default=20,help='slot quantity')
+    parser.add_option('--bidder-qty',dest='bidder_qty',type='int',default=40,help='bidder quantity')
     parser.add_option('--slot-duration-max',dest='slot_duration_max',type='int',default=120,help='slot maximum duration')
     parser.add_option('--advert-duration-max',dest='advert_duration_max',type='int',default=100,help='advert maximum duration')
     parser.add_option('--advert-price-max',dest='advert_price_max',type='float',default=100.0,help='advert maximum price (per second)')
@@ -281,7 +280,9 @@ if __name__=='__main__':
             '--distributions',dest='distributions',type='str',action='callback',callback=convertToJson,
             default=[
 #                [CONSTANT,CONSTANT,CONSTANT,CONSTANT,CONSTANT,CONSTANT,FIXED],
-                [NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,LINEAR],
+#                [NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,LINEAR],
+#                [CONSTANT,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,LINEAR],
+                [CONSTANT,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,FIXED],
             ],
             help='distributions for the following values:'
                     'slot duration (cnu), advert duration (cnu), '
@@ -333,8 +334,8 @@ if __name__=='__main__':
     elif price_vector=='zero': auction_processor.vcgClass = tvauction.processor.Zero
     
     if core_algorithm=='trim': auction_processor.core_algorithm = tvauction.processor.CorePricing.TRIM_VALUES
-    elif core_algorithm=='switch': auction_processor.core_algorithm = tvauction.processor.CorePricing.SWITCH_COALITION
-    elif core_algorithm=='update': auction_processor.core_algorithm = tvauction.processor.CorePricing.SWITCH_COALITION_UPDATE_EBPO
+    elif core_algorithm=='switch': auction_processor.core_algorithm = tvauction.processor.CorePricing.REUSE_COALITIONS
+    elif core_algorithm=='update': auction_processor.core_algorithm = tvauction.processor.CorePricing.SWITCH_COALITIONS
     
     
     results = []
@@ -373,7 +374,7 @@ if __name__=='__main__':
         print 'distribution: ', distribution
         print 'solving...'
         
-        res = auction_processor.solve(slots, bidderInfos, 5, 10, None)
+        res = auction_processor.solve(slots, bidderInfos, None, None, None)
         
         calc_duration += time.clock()
         print 'duration: %.1f seconds' % calc_duration
