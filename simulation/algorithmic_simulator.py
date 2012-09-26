@@ -373,7 +373,7 @@ if __name__=='__main__':
         print 'distribution: ', distribution
         print 'solving...'
         
-        res = auction_processor.solve(slots, bidderInfos, None, None, None)
+        res = auction_processor.solve(slots, bidderInfos, 10, 20, None)
         
         calc_duration += time.clock()
         print 'duration: %.1f seconds' % calc_duration

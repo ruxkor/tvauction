@@ -55,7 +55,7 @@ class Gwd(object):
         prob += sum(bidder_info.budget*y[j] for (j,bidder_info) in bidder_infos.iteritems())
         # add constraints to problem
         for con in cons: prob += con
-        return (prob, (x,y,cons))
+        return prob, (x,y,cons)
     
     def solve(self, prob, prob_vars):
         logging.info('wdp:\tcalculating...')
@@ -63,25 +63,24 @@ class Gwd(object):
         solver_status = prob.solve(self.solver)
         _x, y, _cons = prob_vars
         logging.info('wdp:\tstatus: %s' % pu.LpStatus[solver_status])
-        winners = frozenset(j for (j,y_j) in y.iteritems() if round(y_j.value())==1)
+        winners = frozenset(j for (j,y_j) in y.iteritems() if round(y_j.varValue)==1)
         
         revenue_raw = pu.value(prob.objective)
         prices_raw = dict((w,self.bidder_infos[w].budget) for w in winners)
         
         logging.info('raw:\trevenue %d, prices: %s' % (revenue_raw,sorted(prices_raw.iteritems())))
-        return (solver_status,(revenue_raw, prices_raw, winners))
+        return solver_status,(revenue_raw, prices_raw, winners)
     
     def getSlotAssignments(self, winners, x):
         winners_slots = dict((w,[]) for w in winners)
         for slot_id, slot_user_vars in x.iteritems():
-            slot_winners = [user_id for (user_id,has_won) in slot_user_vars.iteritems() if user_id in winners and has_won.value() and round(has_won.value()) == 1]
+            slot_winners = [user_id for (user_id,has_won) in slot_user_vars.iteritems() if user_id in winners and has_won.varValue and round(has_won.varValue) == 1]
             for slot_winner in slot_winners: winners_slots[slot_winner].append(slot_id)
         return winners_slots
     
     def getCoalitionValue(self, coalition):
-        return sum(self.bidder_infos[j].budget for j in coalition)
-    
-    
+        return sum(self.bidder_infos[j].budget for j in coalition) if coalition else 0
+
     
 class ReservePrice(object):
     def __init__(self, gwd):
@@ -96,7 +95,7 @@ class ReservePrice(object):
             price_reserve = sum(slots[slot_id].price for slot_id in slot_ids_won)*bidder_info.length
             prices_after[w] = max(price_reserve, prices_before[w])
         revenue_after = sum(prices_after.itervalues())
-        return (revenue_after,prices_after)
+        return revenue_after, prices_after
 
 class InitialPricing(object):
     def __init__(self, gwd):
@@ -107,7 +106,7 @@ class InitialPricing(object):
         winners_without_bidders = {}
         prob_vcg = prob_gwd.deepcopy()
         for w in winners:
-            winners_without_bidders[w] = self.solveStep(prob_vcg, prob_vars, w)
+            winners_without_bidders[w] = self.solveStep(prob_vcg, prob_vars, w)[0]
         return winners_without_bidders
         
     def getPricesForBidders(self, revenue_raw, winners, winners_without_bidders):
@@ -122,7 +121,7 @@ class Zero(InitialPricing):
     '''the zero pricing vector class'''
         
     def solveStep(self, prob_vcg, prob_vars, winner_id):
-        return frozenset()
+        return frozenset(), None
     
     def getPriceForBidder(self, budget, revenue_raw, revenue_without_bidder):
         return 0
@@ -133,7 +132,7 @@ class Vcg(InitialPricing):
     
     def solveStep(self, prob_vcg, prob_vars, winner_id):
         '''takes the original gwd problem, and forces a winner to lose. used in vcg calculation'''
-        _x, y, _cons = prob_vars
+        x, y, _cons = prob_vars
         
         logging.info('vcg:\tcalculating - without winner %s' % (winner_id,))
         prob_vcg.name = 'vcg_%d' % winner_id
@@ -142,8 +141,9 @@ class Vcg(InitialPricing):
         solver_status = prob_vcg.solve(self.gwd.solver)
         logging.info('vcg:\tstatus: %s' % pu.LpStatus[solver_status])
         del prob_vcg.constraints['vcg_%d' % winner_id]
-        winners_without_w = frozenset(j for (j,y_j) in y.iteritems() if round(y_j.value())==1)
-        return winners_without_w
+        winners_without_w = frozenset(j for (j,y_j) in y.iteritems() if round(y_j.varValue)==1)
+        winners_slots = self.gwd.getSlotAssignments(winners_without_w,x)
+        return winners_without_w, winners_slots
     
     def getPriceForBidder(self, budget, revenue_raw, revenue_without_bidder):
         return max(0, budget - max(0, (revenue_raw-revenue_without_bidder)))
@@ -176,6 +176,7 @@ class CorePricing(object):
     
     
     def _createEbpo(self, name, winners, coalitions, prices_vcg):
+        bidder_infos = self.gwd.bidder_infos
         # init ebpo
         prob_ebpo = pu.LpProblem('ebpo',pu.LpMinimize)
         prob_ebpo.name = name
@@ -185,7 +186,7 @@ class CorePricing(object):
         
         # variables: m, π_j 
         m = pu.LpVariable('m',cat=pu.LpContinuous)
-        pi = dict((w,pu.LpVariable('pi_%d' % (w,), cat=pu.LpContinuous, lowBound=prices_vcg[w], upBound=self.gwd.bidder_infos[w].budget)) for w in winners)
+        pi = dict((w,pu.LpVariable('pi_%d' % (w,), cat=pu.LpContinuous, lowBound=prices_vcg[w], upBound=bidder_infos[w].budget)) for w in winners)
         
         # add objective function
         prob_ebpo += sum(pi.itervalues()) + epsilon*m
@@ -195,33 +196,55 @@ class CorePricing(object):
         
         # add coalition constraints for all coalitions without the winning coalition
         if self.algorithm==self.REUSE_COALITIONS:
-            for c in coalitions-{winners}: prob_ebpo += sum(pi[wnb] for wnb in winners-c) >= sum(bidder_infos[j].budget for j in c-winners)
-        return (prob_ebpo, pi)
+            for c in coalitions-{winners}:
+                # \sum_{j \in W \setminus C} \pi_j >= \sum_{j \in C} b_j - \sum_{j \in W \cap C} b_j = \sum_{j \in C \setminus W} b_j 
+                prob_ebpo += sum(pi[wnb] for wnb in winners-c) >= sum(bidder_infos[j].budget for j in c-winners)
+        return prob_ebpo, pi
     
     
-    def _updateToBestCoalition(self, coalitions, winners_without_bidders, current_coalition, prob_vcg, prob_vars):
+    def _updateToBestCoalition(self, new_coalition, new_coalition_winners_slots, coalitions, winners_without_bidders, prob_vcg, prob_vars):
         '''iteratively update to the best coalition, generating new coalitions while getting vcg coalitions on the way.
-        update coalitions and winners_without_bidders in-place!'''
+        @param new_coalition: the coalition to add to the set.
+        @param new_coalition_winners_slots: thew winners_slots dict for new_coalition
+        @param coalitions: the coalition set. IN-PLACE change
+        @param winners_without_bidders: IN-PLACE change
+        '''        
         coalition_changed = False
-        best_coalition = current_coalition
-        while best_coalition != self._getBestCoalition(coalitions):
+        winners_slots = None
+        best_coalition = self._getBestCoalition(coalitions)
+        dirty = False
+        isBetter = lambda what,compared_to: self.gwd.getCoalitionValue(what) > self.gwd.getCoalitionValue(compared_to)
+        
+        if new_coalition:        
+            coalitions.add(new_coalition)
+        if new_coalition and isBetter(new_coalition,best_coalition):
+            best_coalition = new_coalition
+            winners_slots = new_coalition_winners_slots
             coalition_changed = True
-            best_coalition = self._getBestCoalition(coalitions)
-            winners_without_bidders.update(
-                (j, self.vcg.solveStep(prob_vcg,prob_vars,j)) 
-                for j in best_coalition if j not in winners_without_bidders
-            )
-            coalitions.update(winners_without_bidders.itervalues())
-        return coalition_changed, best_coalition
-    
+            dirty = True
+        while dirty:
+            dirty = False
+            missing_winners = (j for j in best_coalition if j not in winners_without_bidders)
+            for j in missing_winners:
+                coalition_without_j, coalition_slots_without_j = self.vcg.solveStep(prob_vcg,prob_vars,j)
+                winners_without_bidders[j] = coalition_without_j 
+                coalitions.add(coalition_without_j)
+                if isBetter(coalition_without_j,best_coalition):
+                    best_coalition = coalition_without_j
+                    winners_slots = coalition_slots_without_j
+                    coalition_changed = True
+                    dirty = True
+        return best_coalition if coalition_changed else None, winners_slots
+                    
     def _getBestCoalition(self, coalitions):
-        return max(coalitions, key=self.gwd.getCoalitionValue)
+        return max(coalitions, key=self.gwd.getCoalitionValue) if coalitions else None
 
     
-    def solve(self, prob_gwd, winners, winners_without_bidders, prob_vars):
+    def solve(self, prob_gwd, winners, winners_slots, winners_without_bidders, prob_vars):
         
         coalitions = set()
         bidder_infos = self.gwd.bidder_infos
+        winners_without_bidders = winners_without_bidders.copy()
         
         # we need a prob_vcg because of the generation of vcg prices for new coalition entries
         prob_vcg = prob_gwd.copy()
@@ -231,13 +254,10 @@ class CorePricing(object):
         ebpo_solver = SOLVER_CLASS(msg=SOLVER_MSG, mip=False)
         pi = {}
         
-        # add winners and winners_without_bidders to the coalitions
-        coalitions.add(winners)
-        coalitions.update(winners_without_bidders.itervalues())
         
         # get currently highest valued coalition
         if self.algorithm in (self.REUSE_COALITIONS,self.SWITCH_COALITIONS):
-            _coalition_changed, winners = self._updateToBestCoalition(coalitions, winners_without_bidders, winners, prob_vcg, prob_vars)        
+            winners, winners_slots = self._updateToBestCoalition(winners, winners_slots, coalitions, winners_without_bidders, prob_vcg, prob_vars)
         revenue_raw = self.gwd.getCoalitionValue(winners)
         
         # init prices_vcg and prices_t
@@ -253,10 +273,11 @@ class CorePricing(object):
         step_info = [{'raw':revenue_raw,'vcg':sum(prices_vcg.itervalues())}]
         
         # get problem vars
-        _x, y, _cons = prob_vars
+        x, y, _cons = prob_vars
         
         # abort after 1000 iterations (this should never happen)
         for cnt in xrange(1000):
+            
             # create sep
             prob_sep = self._createSep('sep_%d' % cnt, winners, prices_t, prob_gwd, y)
             
@@ -274,36 +295,46 @@ class CorePricing(object):
                 break
             
             # get the blocking coalition
-            blocking_coalition, blocking_coalition_last = frozenset(bidder_id for (bidder_id,y_j) in y.iteritems() if round(y_j.value())==1), blocking_coalition
-            logging.info('sep:\tvalue: %d, blocking: %s' % (obj_value_sep, sorted(blocking_coalition),))
-            # and add it to the list of coalitions
-            coalitions.add(blocking_coalition)
+            blocking_coalition, blocking_coalition_last = frozenset(bidder_id for (bidder_id,y_j) in y.iteritems() if round(y_j.varValue)==1), blocking_coalition
+            blocking_coalition_slots = self.gwd.getSlotAssignments(blocking_coalition, x)
+            logging.info('sep:\tvalue: %d, coalition: value: %d, members: %s' % (obj_value_sep, self.gwd.getCoalitionValue(blocking_coalition), sorted(blocking_coalition)))
             
-            # if the added coalition is better than the currently winning coalition, get all new vcg coalitions and repeat
+            # check if the blocking coalition is better. if yes update the winning coalition
             if self.algorithm in (self.SWITCH_COALITIONS,self.REUSE_COALITIONS):
-                winners_changed, winners = self._updateToBestCoalition(coalitions, winners_without_bidders, winners, prob_vcg, prob_vars)
-            
-            if prob_ebpo is None or self.algorithm in (self.SWITCH_COALITIONS,self.REUSE_COALITIONS) and winners_changed:
-                revenue_raw = sum(bidder_infos[w].budget for w in winners)
+                new_winners, new_winners_slots = self._updateToBestCoalition(blocking_coalition, blocking_coalition_slots, coalitions, winners_without_bidders, prob_vcg, prob_vars)
+                if new_winners: winners, winners_slots = new_winners, new_winners_slots
+                
+            # if there is no ebpo or if the winners changed and we use an appropriate algorithm, recreate the ebpo
+            if prob_ebpo is None or self.algorithm in (self.SWITCH_COALITIONS, self.REUSE_COALITIONS) and new_winners:
+                revenue_raw = self.gwd.getCoalitionValue(winners)
                 prices_vcg = self.vcg.getPricesForBidders(revenue_raw, winners, winners_without_bidders)
+                logging.info('ebpo:\tcreating - coalition value: %d, winners: %s' % (self.gwd.getCoalitionValue(winners),sorted(winners)))
                 prob_ebpo, pi = self._createEbpo('ebpo_%d' % cnt, winners, coalitions, prices_vcg)
+                
+            # else if the winners did not change and we are using switch/reuse, add the constraint
+            elif self.algorithm in (self.SWITCH_COALITIONS, self.REUSE_COALITIONS) and not new_winners:
+                prob_ebpo += sum(pi[wnb] for wnb in winners-blocking_coalition) >= sum(bidder_infos[j].budget for j in blocking_coalition-winners)
+            
+            # else if we trim the values, we always call this block
             elif self.algorithm==self.TRIM_VALUES:
                 prob_ebpo += sum(pi[wnb] for wnb in winners-blocking_coalition) >= min(
                     sum(bidder_infos[j].budget for j in blocking_coalition-winners), # original right-hand side of constraint 
                     sum(bidder_infos[j].budget for j in winners-blocking_coalition)  # can be at most b_j forall j in W\C^t
                 )
-            else:
-                prob_ebpo += sum(pi[wnb] for wnb in winners-blocking_coalition) >= sum(bidder_infos[j].budget for j in blocking_coalition-winners)
+            else: raise Exception('logical error')
+                
                 
             # ebpo: solve (this problem can be formulated as a continuous LP).
-            logging.info('ebpo:\tcalculating - step %s' % (cnt),)
+            logging.info('ebpo:\tcalculating - step %s' % cnt)
+            prob_ebpo.writeLP('ebpo_%d.lp' % cnt)
             solver_status = prob_ebpo.solve(ebpo_solver)
             
-            # update the π_t list. sum(π_t) has to be equal or increase for each t
-            prices_t = dict((j,pi_j.value() or pi_j.lowBound) for (j,pi_j) in pi.iteritems())
+            # update the π_t list. sum(π_t) has to be equal or increase for each t (except when changing winners)
+            prices_t = dict((j,pi_j.varValue or pi_j.lowBound) for (j,pi_j) in pi.iteritems())
             prices_t_sum, prices_t_sum_last = round(sum(prices_t.itervalues()),2), prices_t_sum
             # ebpo: has to be feasible
             assert solver_status == pu.LpStatusOptimal, 'ebpo: not optimal - %s' % pu.LpStatus[solver_status]
+            logging.info('ebpo:\tvalue: %d' % prices_t_sum)
             
             # update step_info
             step_info.append({'ebpo':prices_t_sum,'sep':obj_value_sep,'raw':revenue_raw,'vcg':sum(prices_vcg.itervalues())})
@@ -318,7 +349,7 @@ class CorePricing(object):
             
         revenue_core = sum(prices_t.itervalues())
         logging.info('core:\trevenue %d, prices: %s' % ( revenue_core, sorted((j,round(pi_j,2)) for (j,pi_j) in prices_t.iteritems()) ) )
-        return (winners, prices_t, prices_vcg, step_info)
+        return winners_slots, prices_t, prices_vcg, step_info
         
 class TvAuctionProcessor(object):
     def __init__(self):
@@ -343,42 +374,42 @@ class TvAuctionProcessor(object):
         # generate the gwd    
         gwd = self.gwdClass(slots, bidder_infos)
         prob_gwd, prob_vars = gwd.generate()
-        x, y, _cons = prob_vars
+        x, _y, _cons = prob_vars
         
         gwd.solver.epgap = epgap
         gwd.solver.timeLimit = timeLimitGwd
         
         # solve gwd
-        _solver_status, (revenue_raw, prices_raw, winners) = gwd.solve(prob_gwd, prob_vars)
+        _solver_status, (revenue_raw, _prices_raw, winners) = gwd.solve(prob_gwd, prob_vars)
         
+        # get the slots for the winners (usually re-set if we switch/reuse coalitions) 
+        winners_slots = gwd.getSlotAssignments(winners, x)
         # re-set timeLimit
         gwd.solver.timeLimit = timeLimit
         
-        # solve vcg
+        # solve vcg (only if we trim)
+        # the vcg prices/coalitions are generated iteratively in the core class when we switch/reuse coalitions
         vcg = self.vcgClass(gwd)
-        winners_without_bidders = vcg.getCoalitions(revenue_raw, winners, prob_gwd, prob_vars)
+        winners_without_bidders = vcg.getCoalitions(revenue_raw, winners, prob_gwd, prob_vars) \
+            if self.core_algorithm == CorePricing.TRIM_VALUES else {}
 
         # solve core pricing problem
         core = self.coreClass(gwd, vcg, self.core_algorithm)
-        winners_core, prices_core, prices_vcg, step_info = core.solve(prob_gwd, winners, winners_without_bidders, prob_vars)
+        winners_slots_core, prices_core, prices_vcg, step_info = core.solve(prob_gwd, winners, winners_slots, winners_without_bidders, prob_vars)
         
-        # re-solve the gwd to get the slot assignments (this is ok, since we pre-seed the prob with constraints)
-        if winners_core != winners:
-            for wc in winners_core: prob_gwd.addConstraint(y[wc] == 1,'forcewin_%d' % wc)
-            gwd.solver.timeLimit = timeLimitGwd
-            _solver_status, (revenue_raw, prices_raw, winners) = gwd.solve(prob_gwd, prob_vars)
-            
-        # get the slots for the winners
-        winners_slots = gwd.getSlotAssignments(winners, x)
-
+        # if the winners set was recreated
+        if winners_slots_core: winners_slots = winners_slots_core
+        winners = frozenset(winners_slots)
+        
         # raise prices to the reserve price if needed
         reservePrice = self.reservePriceClass(gwd)
         _revenue_after, prices_after = reservePrice.solve(winners_slots, prices_core)
         
+        
         return {
-            'winners': sorted(winners_slots.keys()),
+            'winners': sorted(winners),
             'winners_slots': winners_slots,
-            'prices_raw': prices_raw,
+            'prices_raw': dict((w,bidder_infos[w].budget) for w in winners),
             'prices_vcg': prices_vcg,
             'prices_core': prices_core,
             'prices_final': prices_after,
