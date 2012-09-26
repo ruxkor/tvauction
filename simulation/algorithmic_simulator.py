@@ -325,6 +325,8 @@ if __name__=='__main__':
     log_level = int(os.environ['LOG_LEVEL']) \
         if 'LOG_LEVEL' in os.environ \
         else logging.WARN
+    if log_level < logging.INFO:
+        tvauction.processor.SOLVER_MSG = True
     
     logging.basicConfig(level=log_level)
     
