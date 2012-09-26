@@ -325,7 +325,7 @@ if __name__=='__main__':
     log_level = int(os.environ['LOG_LEVEL']) \
         if 'LOG_LEVEL' in os.environ \
         else logging.WARN
-    if log_level < logging.INFO:
+    if log_level <= logging.INFO:
         tvauction.processor.SOLVER_MSG = True
     
     logging.basicConfig(level=log_level)
@@ -370,12 +370,12 @@ if __name__=='__main__':
                 attrib_values=bidder_prio_values
             )
         
-        # run it..    
+        # run it..
         calc_duration = -time.clock()
         print 'distribution: ', distribution
         print 'solving...'
         
-        res = auction_processor.solve(slots, bidderInfos, 10, 20, None)
+        res = auction_processor.solve(slots, bidderInfos, 8, 16, None)
         
         calc_duration += time.clock()
         print 'duration: %.1f seconds' % calc_duration

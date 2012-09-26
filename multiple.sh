@@ -24,7 +24,5 @@ for iv in $INITIAL_VECTOR; do
 		done
 	done
 done
-
 popd >/dev/null
-
 echo "done"

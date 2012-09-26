@@ -29,8 +29,8 @@ configurable parameters
 3.    define bidding behavior
 3.1.    - define distribution between priorities
            - constant: all bidders will have the same priority vector
-           - normal: the differences in the priority vector will be normally distributed
-           - uniform: the differences in the priority vector will be uniformly distributed
+           - normal: the priority vectors will be normally distributed
+           - uniform: the priority vectors will be uniformly distributed
 3.2    - define relation between reserve price and priority vector
            - fixed: there is no correlation between the reserve price and the priority vector
            - linear: there is a linear correlation between the reserve price and the priority vector
