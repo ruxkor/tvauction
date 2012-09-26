@@ -326,7 +326,6 @@ class CorePricing(object):
                 
             # ebpo: solve (this problem can be formulated as a continuous LP).
             logging.info('ebpo:\tcalculating - step %s' % cnt)
-            prob_ebpo.writeLP('ebpo_%d.lp' % cnt)
             solver_status = prob_ebpo.solve(ebpo_solver)
             
             # update the π_t list. sum(π_t) has to be equal or increase for each t (except when changing winners)

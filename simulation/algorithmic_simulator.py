@@ -280,11 +280,11 @@ if __name__=='__main__':
             '--distributions',dest='distributions',type='str',action='callback',callback=convertToJson,
             default=[
 #                [CONSTANT,CONSTANT,CONSTANT,CONSTANT,CONSTANT,CONSTANT,FIXED],
-#                [NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,LINEAR],
-#                [CONSTANT,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,LINEAR],
+                [NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,LINEAR],
+                [CONSTANT,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,LINEAR],
                 [CONSTANT,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,FIXED],
             ],
-            help='distributions for the following values:'
+            help=   'distributions for the following values:'
                     'slot duration (cnu), advert duration (cnu), '
                     'slot reserve price (cnu), bidder\'s ad price (cnu), ' 
                     'minimum prio vector (cnu), inter-bidding priority vectors (cnu),'
