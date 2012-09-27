@@ -20,7 +20,7 @@ for iv in $INITIAL_VECTOR; do
 			debug_file="debug-$log_suffix"
 			echo -n "."
 			echo -e "$(date) $SLOT_QTY $BIDDER_QTY $iv $algo $rs\n-------------\n" >$log_file
-			LOG_LEVEL=20 python ../simulation/algorithmic_simulator.py --slot-qty=$SLOT_QTY --bidder-qty=$BIDDER_QTY --initial-vector=$iv --core-algorithm=$algo --random-seed=$rs 2>$debug_file >>$log_file
+			LOG_LEVEL=19 python ../simulation/algorithmic_simulator.py --slot-qty=$SLOT_QTY --bidder-qty=$BIDDER_QTY --initial-vector=$iv --core-algorithm=$algo --random-seed=$rs 2>$debug_file >>$log_file
 		done
 	done
 done

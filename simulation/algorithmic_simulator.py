@@ -263,6 +263,7 @@ if __name__=='__main__':
     parser.add_option('--initial-vector',dest='price_vector',choices=('vcg','zero'),default='vcg',help='the type of price vector used as a starting point for core price generation (vcg,zero)')
     parser.add_option('--core-algorithm',dest='core_algorithm',choices=('trim','switch','reuse'),default='reuse',help='which algorithm should be used in case a suboptimal winner determination is discovered during core pricing (trim: trim the values to be within a feasible region, switch: recreate the ebpo,reuse: recreate the ebpo and try to re-use already existing constraints)')
     parser.add_option('--no-draw',dest='draw_results',action='store_false',default=True,help='draw graphs illustrating the allocation and the process')
+    parser.add_option('--no-solve',dest='solve_problems',action='store_false',default=True,help='draw graphs illustrating the allocation and the process')
     parser.add_option('--slot-qty',dest='slot_qty',type='int',default=20,help='slot quantity')
     parser.add_option('--bidder-qty',dest='bidder_qty',type='int',default=40,help='bidder quantity')
     parser.add_option('--slot-duration-max',dest='slot_duration_max',type='int',default=120,help='slot maximum duration')
@@ -304,6 +305,7 @@ if __name__=='__main__':
     
     random_seed = options.random_seed
     draw_results = options.draw_results
+    solve_problems = options.solve_problems
     price_vector = options.price_vector
     core_algorithm = options.core_algorithm
     
@@ -341,6 +343,9 @@ if __name__=='__main__':
     
     results = []
     for distribution in distributions:
+        print ''
+        print '-' * 40
+        print 'distribution: ', distribution
         d_slot_duration, d_ad_duration, d_slot_price, d_bid_price, d_min_prio, d_inter_prio, d_prio_to_price = distribution
         # generate slot objects
         slots = dict(
@@ -370,12 +375,50 @@ if __name__=='__main__':
                 attrib_values=bidder_prio_values
             )
         
-        # run it..
-        calc_duration = -time.clock()
-        print 'distribution: ', distribution
-        print 'solving...'
+        # calculate statistics about bidder demand
+        slots_total_time = sum(s.length for s in slots.itervalues())
+        bidder_info_stats = {}
+        for b in bidderInfos.itervalues():
+            min_count = 0
+            max_count = 0
+            # sort its priority vector ascending/descending to get min/max
+            
+            total_prio = sum(b.attrib_values.itervalues())
+            sort_by_prio = lambda a: a[1]
+            for slot_id,priority in sorted(b.attrib_values.iteritems(), key=sort_by_prio):
+                if priority <= 0: continue
+                total_prio -= priority
+                max_count += 1
+                if total_prio < b.attrib_min: break
+            total_prio = sum(b.attrib_values.itervalues())
+            for slot_id,priority in sorted(b.attrib_values.iteritems(), key=sort_by_prio,reverse=True):
+                if priority <= 0: continue                
+                total_prio -= priority
+                min_count += 1
+                if total_prio < b.attrib_min: break
+            count_stats = (min_count,max_count,(max_count+min_count)/2)
+            len_stats = tuple(b.length*v for v in count_stats)
+            bidder_info_stats[b.id] = (count_stats,len_stats)
         
-        res = auction_processor.solve(slots, bidderInfos, 8, 16, None)
+        print 'slots - amount: %d, total time: %d seconds' % (len(slots), slots_total_time)
+        print 'bidders - amount: %d' % len(bidderInfos)
+        print 'demand - min: %.2f %%, max: %.2f %%, avg: %.2f %%' % (
+            100.0 * sum(v[1][0] for v in bidder_info_stats.itervalues()) / slots_total_time,
+            100.0 * sum(v[1][1] for v in bidder_info_stats.itervalues()) / slots_total_time,
+            100.0 * sum(v[1][2] for v in bidder_info_stats.itervalues()) / slots_total_time
+        )
+        
+        print 'slot placements per bidder (min,max,avg):'
+        for b_id,stat in bidder_info_stats.iteritems():
+            print '  id %d: min %d, max %d, avg %d' % (b_id,stat[0][0],stat[0][1],stat[0][2])
+        
+        if not solve_problems:
+            print 'not solving as requested'
+            continue
+        
+        print 'solving...'
+        calc_duration = -time.clock()
+        res = auction_processor.solve(slots, bidderInfos, 10, 30, None)
         
         calc_duration += time.clock()
         print 'duration: %.1f seconds' % calc_duration
