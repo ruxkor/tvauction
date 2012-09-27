@@ -325,7 +325,7 @@ if __name__=='__main__':
     log_level = int(os.environ['LOG_LEVEL']) \
         if 'LOG_LEVEL' in os.environ \
         else logging.WARN
-    if log_level <= logging.INFO:
+    if log_level < logging.INFO:
         tvauction.processor.SOLVER_MSG = True
     
     logging.basicConfig(level=log_level)
@@ -385,8 +385,9 @@ if __name__=='__main__':
             print '  %s\t%d' % (what, sum(res['prices_%s' % what].itervalues()))
         
         if draw_results:
-            if not os.path.exists('/tmp/tvauction'): os.makedirs('/tmp/tvauction')
-            now = datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')
-            drawResult('/tmp/tvauction/simulation_%s_%s' % (now,''.join(map(str,distribution))), res)
+            graph_path = '/tmp/tvauction/%s-%s-%s' % (price_vector, core_algorithm, random_seed)
+            if not os.path.exists(graph_path): os.makedirs(graph_path)
+            now = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+            drawResult(graph_path+'/simulation_%s_%s' % (now,''.join(map(str,distribution))), res)
             
         results.append(res)
