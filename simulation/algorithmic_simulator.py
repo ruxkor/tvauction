@@ -282,8 +282,8 @@ if __name__=='__main__':
     parser.add_option('--slot-qty',dest='slot_qty',type='int',default=20,help='slot quantity')
     parser.add_option('--bidder-qty',dest='bidder_qty',type='int',default=40,help='bidder quantity')
     parser.add_option('--slot-duration-max',dest='slot_duration_max',type='int',default=120,help='slot maximum duration')
-    parser.add_option('--advert-duration-max',dest='advert_duration_max',type='int',default=100,help='advert maximum duration')
-    parser.add_option('--advert-price-max',dest='advert_price_max',type='float',default=100.0,help='advert maximum price (per second)')
+    parser.add_option('--advert-duration-max',dest='advert_duration_max',type='int',default=40,help='advert maximum duration')
+    parser.add_option('--advert-price-max',dest='advert_price_max',type='float',default=120.0,help='advert maximum price (per second)')
     parser.add_option(
             '--slot-price-steps',dest='slot_price_steps',type='str',action='callback',default=[1.0,2.0,5.0,10.0,20.0,50.0,75.0],
             help='slot price (per second), in steps [json]',callback=convertToJson
@@ -297,7 +297,7 @@ if __name__=='__main__':
             default=[
 #                [CONSTANT,CONSTANT,CONSTANT,CONSTANT,CONSTANT,CONSTANT,FIXED],
                 [NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,LINEAR],
-                [CONSTANT,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL_NARROW,LINEAR],
+#                [CONSTANT,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL_NARROW,LINEAR],
             ],
             help=   'distributions for the following values:'
                     'slot duration (cnu), advert duration (cnu), '
@@ -431,7 +431,7 @@ if __name__=='__main__':
         
         print 'solving...'
         calc_duration = -time.clock()
-        res = auction_processor.solve(slots, bidderInfos, 40, 60, None)
+        res = auction_processor.solve(slots, bidderInfos, 5, 5, None)
         
         calc_duration += time.clock()
         print 'duration: %.1f seconds' % calc_duration
