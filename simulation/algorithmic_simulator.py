@@ -288,7 +288,7 @@ if __name__=='__main__':
             help='slot price (per second), in steps [json]',callback=convertToJson
     )
     parser.add_option(
-            '--campaign-min-prio-range',dest='campaign_min_prio_range',type='str',action='callback',default=[1,50],
+            '--campaign-min-prio-range',dest='campaign_min_prio_range',type='str',action='callback',default=[15,50],
             help='campaign minimum priority vector sum ranges (min/max, as percent) [json]', callback=convertToJson
     )
     parser.add_option(
