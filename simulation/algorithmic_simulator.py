@@ -201,7 +201,6 @@ def generate(slot_qty,bidder_qty,slot_duration_max,advert_duration_max,slot_pric
         if bidder_id not in campaign_min_prio_sum: campaign_min_prio_sum[bidder_id] = {}
         for stype in (CONSTANT,NORMAL,UNIFORM):
             campaign_min_prio_sum[bidder_id][stype] = campaignMinPrioSum.getData(stype)
-#    pp(campaign_min_prio_sum)
     
     return (slot_durations, slot_prices, priority_bidders, advert_durations, advert_prices, campaign_min_prio_sum)
 
@@ -396,19 +395,19 @@ if __name__=='__main__':
             max_count = 0
             # sort its priority vector ascending/descending to get min/max
             
-            total_prio = sum(b.attrib_values.itervalues())
             sort_by_prio = lambda a: a[1]
+            count_prio = 0
             for slot_id,priority in sorted(b.attrib_values.iteritems(), key=sort_by_prio):
                 if priority <= 0: continue
-                total_prio -= priority
+                count_prio += priority
                 max_count += 1
-                if total_prio < b.attrib_min: break
-            total_prio = sum(b.attrib_values.itervalues())
+                if count_prio >= b.attrib_min: break
+            count_prio = 0
             for slot_id,priority in sorted(b.attrib_values.iteritems(), key=sort_by_prio,reverse=True):
                 if priority <= 0: continue                
-                total_prio -= priority
+                count_prio += priority
                 min_count += 1
-                if total_prio < b.attrib_min: break
+                if count_prio >= b.attrib_min: break
             count_stats = (min_count,max_count,(max_count+min_count)/2)
             len_stats = tuple(b.length*v for v in count_stats)
             bidder_info_stats[b.id] = (count_stats,len_stats)
