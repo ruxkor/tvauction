@@ -18,11 +18,15 @@ import tvauction.processor
 
 from pprint import pprint as pp
 
+CONSTANT = 0
+UNIFORM = 1
+NORMAL = 2
+NORMAL_NARROW = 3
+
 FIXED = 0
 LINEAR = 1
-CONSTANT = 1
-NORMAL = 2
-UNIFORM = 3
+QUADRATIC = 2
+SQUARE_ROOT = 3
 
 #FIXED = 'fixed'
 #LINEAR = 'linear'
@@ -87,13 +91,21 @@ class SlotPriceToPrio(SimulationComponent):
     @staticmethod
     def _prioLinear(slot_price):
         return slot_price
+    @staticmethod
+    def _prioQuadratic(slot_price):
+        return slot_price**2
+    @staticmethod
+    def _prioSqrt(slot_price):
+        return int(slot_price**0.5)
     
     def __init__(self, slot_prices, *a, **kw):
         super(SlotPriceToPrio, self).__init__(*a, **kw)
         self.slot_prices = slot_prices
         self.prio_functions = {
             FIXED: SlotPriceToPrio._prioFixed,
-            LINEAR: SlotPriceToPrio._prioLinear
+            LINEAR: SlotPriceToPrio._prioLinear,
+            QUADRATIC: SlotPriceToPrio._prioQuadratic,
+            SQUARE_ROOT: SlotPriceToPrio._prioSqrt
         }
         
     def getData(self, stype, prio_type):
@@ -107,6 +119,8 @@ class SlotPriceToPrio(SimulationComponent):
                 res[slot_type] = [random.randint(0,slot_prio*2) for slot_prio in slot_prios]
             elif stype==NORMAL:
                 res[slot_type] = [round(max(0,random.gauss(slot_prio,slot_prio/2)),2) for slot_prio in slot_prios]
+            elif stype==NORMAL_NARROW:
+                res[slot_type] = [round(max(0,random.gauss(slot_prio,slot_prio*0.2)),2) for slot_prio in slot_prios]
         return res
     
 class AdvertDuration(SimulationComponent):
@@ -129,6 +143,7 @@ class CampaignMinPrioSum(SimulationComponent):
         self.campaign_min_prio_range = campaign_min_prio_range
     def getData(self, stype):
         cmin, cmax = campaign_min_prio_range
+        # data gets already trimmed to boundaries
         return cmin+self._getDataContinuos(stype, cmax-cmin, 1)[0]
     
 def generate(slot_qty,bidder_qty,slot_duration_max,advert_duration_max,slot_price_steps,advert_price_max,campaign_min_prio_range):
@@ -159,7 +174,7 @@ def generate(slot_qty,bidder_qty,slot_duration_max,advert_duration_max,slot_pric
     slotPriceToPrio = SlotPriceToPrio(slot_prices, slot_qty, bidder_qty)
     for bidder_id in xrange(bidder_qty):
         if bidder_id not in priority_bidders: priority_bidders[bidder_id] = {}
-        for stype in (CONSTANT,NORMAL,UNIFORM):
+        for stype in (CONSTANT,UNIFORM,NORMAL,NORMAL_NARROW):
             if stype not in priority_bidders[bidder_id]: priority_bidders[bidder_id][stype] = {}
             for prio_type in slotPriceToPrio.prio_functions:
                 priority_bidders[bidder_id][stype][prio_type] = slotPriceToPrio.getData(stype, prio_type)
@@ -282,14 +297,13 @@ if __name__=='__main__':
             default=[
 #                [CONSTANT,CONSTANT,CONSTANT,CONSTANT,CONSTANT,CONSTANT,FIXED],
                 [NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,LINEAR],
-                [CONSTANT,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,LINEAR],
-                [CONSTANT,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,FIXED],
+                [CONSTANT,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL_NARROW,LINEAR],
             ],
             help=   'distributions for the following values:'
                     'slot duration (cnu), advert duration (cnu), '
                     'slot reserve price (cnu), bidder\'s ad price (cnu), ' 
-                    'minimum prio vector (cnu), inter-bidding priority vectors (cnu),'
-                    'relation priority vector to price (fl).' 
+                    'minimum prio vector (cnu), inter-bidding priority vectors (cnun),'
+                    'relation priority vector to price (flqs).' 
                     'values as a list of lists [json]'
     )
     options, args = parser.parse_args(sys.argv)
@@ -341,7 +355,6 @@ if __name__=='__main__':
     elif core_algorithm=='switch': auction_processor.core_algorithm = tvauction.processor.CorePricing.SWITCH_COALITIONS
     elif core_algorithm=='reuse': auction_processor.core_algorithm = tvauction.processor.CorePricing.REUSE_COALITIONS
     
-    results = []
     for distribution in distributions:
         print ''
         print '-' * 40
@@ -418,7 +431,7 @@ if __name__=='__main__':
         
         print 'solving...'
         calc_duration = -time.clock()
-        res = auction_processor.solve(slots, bidderInfos, 10, 30, None)
+        res = auction_processor.solve(slots, bidderInfos, 40, 60, None)
         
         calc_duration += time.clock()
         print 'duration: %.1f seconds' % calc_duration
@@ -433,4 +446,3 @@ if __name__=='__main__':
             now = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
             drawResult(graph_path+'/simulation_%s_%s' % (now,''.join(map(str,distribution))), res)
             
-        results.append(res)
