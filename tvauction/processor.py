@@ -101,10 +101,9 @@ class InitialPricing(object):
     def __init__(self, gwd):
         self.gwd = gwd
         
-    def getCoalitions(self, revenue_raw, winners, prob_gwd, prob_vars):
+    def getCoalitions(self, revenue_raw, winners, prob_vcg, prob_vars):
         logging.info('vcg:\tcalculating...')
         winners_without_bidders = {}
-        prob_vcg = prob_gwd.deepcopy()
         for w in winners:
             winners_without_bidders[w] = self.solveStep(prob_vcg, prob_vars, w)[0]
         return winners_without_bidders
@@ -136,13 +135,20 @@ class Vcg(InitialPricing):
         
         logging.info('vcg:\tcalculating - without winner %s' % (winner_id,))
         prob_vcg.name = 'vcg_%d' % winner_id
-        prob_vcg.addConstraint(y[winner_id] == 0, 'vcg_%d' % winner_id)
         
-        solver_status = prob_vcg.solve(self.gwd.solver)
+        # save the original coefficient
+        winner_coeff = prob_vcg.objective.get(y[winner_id])
+        prob_vcg.objective[y[winner_id]] = 0
+        
+        solver_status = prob_vcg.resolve(self.gwd.solver)
+        # solver_status = prob_vcg.solve(self.gwd.solver)
         logging.info('vcg:\tstatus: %s' % pu.LpStatus[solver_status])
-        del prob_vcg.constraints['vcg_%d' % winner_id]
         winners_without_w = frozenset(j for (j,y_j) in y.iteritems() if round(y_j.varValue)==1)
         winners_slots = self.gwd.getSlotAssignments(winners_without_w,x)
+        
+        # restore coefficient
+        if winner_coeff is not None: prob_vcg.objective[y[winner_id]] = winner_coeff
+        else: del prob_vcg.objective[y[winner_id]]
         return winners_without_w, winners_slots
     
     def getPriceForBidder(self, budget, revenue_raw, revenue_without_bidder):
@@ -154,25 +160,25 @@ class CorePricing(object):
     SWITCH_COALITIONS=2
     REUSE_COALITIONS=3
 
-    
+
     def __init__(self, gwd, vcg, algorithm=REUSE_COALITIONS):
         self.gwd = gwd
         self.vcg = vcg
         self.algorithm = algorithm
     
     
-    def _createSep(self, name, winners, prices_t, prob_gwd, y):
+    def _modifySep(self, name, winners, prices_t, prob_sep, y):
         # make a copy of prob_gwd, since we are using it as basis
-        prob_sep = prob_gwd.deepcopy()
         prob_sep.name = name
         
-        # build sep t variable and modify objective
-        t = dict((w,pu.LpVariable('t_%d' % (w,), cat=pu.LpBinary)) for w in winners)
-        prob_sep.objective -= sum((self.gwd.bidder_infos[w].budget-prices_t[w])*t[w] for w in winners)
-        
-        # add all sep constraints, setting y_i <= t_i
-        for w in winners: prob_sep += y[w] <= t[w]
-        return prob_sep
+        # modify prices according to prices_t. 
+        for w,price_t in prices_t.iteritems():
+            prob_sep.objective[y[w]] = price_t
+            
+        # all others get their budgets as prices (this is needed because maybe the winning coalition changed)
+        loosers_with_budget = ( (j,bidder_info.budget) for (j,bidder_info) in self.gwd.bidder_infos.iteritems() if j not in winners)
+        for j,budget_j in loosers_with_budget:
+            prob_sep.objective[y[j]] = budget_j
     
     
     def _createEbpo(self, name, winners, coalitions, prices_vcg):
@@ -189,10 +195,10 @@ class CorePricing(object):
         pi = dict((w,pu.LpVariable('pi_%d' % (w,), cat=pu.LpContinuous, lowBound=prices_vcg[w], upBound=bidder_infos[w].budget)) for w in winners)
         
         # add objective function
-        prob_ebpo += sum(pi.itervalues()) + epsilon*m
+        prob_ebpo += sum(pi.itervalues()) # + epsilon*m
         
         # add pi constraints
-        for w in winners: prob_ebpo += (pi[w]-m <= prices_vcg[w], 'pi_constr_%d' % w)
+        # for w in winners: prob_ebpo += (pi[w]-m <= prices_vcg[w], 'pi_constr_%d' % w)
         
         # add coalition constraints for all coalitions without the winning coalition
         if self.algorithm==self.REUSE_COALITIONS:
@@ -247,7 +253,8 @@ class CorePricing(object):
         winners_without_bidders = winners_without_bidders.copy()
         
         # we need a prob_vcg because of the generation of vcg prices for new coalition entries
-        prob_vcg = prob_gwd.copy()
+        prob_vcg = prob_gwd
+        prob_sep = prob_gwd
         
         # init ebpo and variables
         prob_ebpo = None
@@ -279,11 +286,11 @@ class CorePricing(object):
         for cnt in xrange(1000):
             
             # create sep
-            prob_sep = self._createSep('sep_%d' % cnt, winners, prices_t, prob_gwd, y)
+            self._modifySep('sep_%d' % cnt, winners, prices_t, prob_sep, y)
             
             # solve it
             logging.info('sep:\tcalculating - step %d' % cnt)
-            solver_status = prob_sep.solve(self.gwd.solver)
+            solver_status = prob_sep.resolve(self.gwd.solver)
             logging.info('sep:\tstatus: %s' % pu.LpStatus[solver_status])
             
             # save the value: z(π^t)
@@ -389,8 +396,10 @@ class TvAuctionProcessor(object):
         # solve vcg (only if we trim)
         # the vcg prices/coalitions are generated iteratively in the core class when we switch/reuse coalitions
         vcg = self.vcgClass(gwd)
-        winners_without_bidders = vcg.getCoalitions(revenue_raw, winners, prob_gwd, prob_vars) \
-            if self.core_algorithm == CorePricing.TRIM_VALUES else {}
+        winners_without_bidders = {}
+        if self.core_algorithm == CorePricing.TRIM_VALUES:
+            prob_vcg = prob_gwd
+            winners_without_bidders = vcg.getCoalitions(revenue_raw, winners, prob_vcg, prob_vars)
 
         # solve core pricing problem
         core = self.coreClass(gwd, vcg, self.core_algorithm)
