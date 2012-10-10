@@ -18,6 +18,8 @@ class Gwd(object):
         self.bidder_infos = bidder_infos
         self.solver = SOLVER_CLASS(msg=SOLVER_MSG)
         
+        self.gaps = [] # will contain all gaps used during calculation 
+        
     def generate(self):
         '''the winner determination, implemented as a multiple knapsack problem'''
         slots, bidder_infos = self.slots, self.bidder_infos
@@ -57,8 +59,9 @@ class Gwd(object):
         logging.info('wdp:\tcalculating...')
         
         solver_status = prob.solve(self.solver)
+        self.gaps.append( (prob.name, prob.solver.epgap_actual) )
         _x, y, _cons = prob_vars
-        logging.info('wdp:\tstatus: %s' % pu.LpStatus[solver_status])
+        logging.info('wdp:\tstatus: %s, gap: %.2f' % (pu.LpStatus[solver_status], prob.solver.epgap_actual))
         winners = frozenset(j for (j,y_j) in y.iteritems() if round(y_j.varValue)==1)
         
         revenue_raw = pu.value(prob.objective)
@@ -137,8 +140,8 @@ class Vcg(InitialPricing):
         prob_vcg.objective[y[winner_id]] = 0
         
         solver_status = prob_vcg.resolve(self.gwd.solver)
-        # solver_status = prob_vcg.solve(self.gwd.solver)
-        logging.info('vcg:\tstatus: %s' % pu.LpStatus[solver_status])
+        self.gwd.gaps.append( (prob_vcg.name, prob_vcg.solver.epgap_actual) )
+        logging.info('vcg:\tstatus: %s, gap: %.2f' % (pu.LpStatus[solver_status], prob_vcg.solver.epgap_actual))
         winners_without_w = frozenset(j for (j,y_j) in y.iteritems() if round(y_j.varValue)==1)
         winners_slots = self.gwd.getSlotAssignments(winners_without_w,x)
         
@@ -259,7 +262,7 @@ class CorePricing(object):
         
         
         # get currently highest valued coalition
-        if self.algorithm in (self.REUSE_COALITIONS,self.SWITCH_COALITIONS):
+        if self.algorithm in (self.REUSE_COALITIONS, self.SWITCH_COALITIONS):
             winners, winners_slots = self._updateToBestCoalition(winners, winners_slots, coalitions, winners_without_bidders, prob_vcg, prob_vars)
         revenue_raw = self.gwd.getCoalitionValue(winners)
         
@@ -287,7 +290,8 @@ class CorePricing(object):
             # solve it
             logging.info('sep:\tcalculating - step %d' % cnt)
             solver_status = prob_sep.resolve(self.gwd.solver)
-            logging.info('sep:\tstatus: %s' % pu.LpStatus[solver_status])
+            self.gwd.gaps.append( (prob_sep.name, prob_sep.solver.epgap_actual) )
+            logging.info('sep:\tstatus: %s, gap: %.2f' % (pu.LpStatus[solver_status], prob_sep.solver.epgap_actual))
             
             # save the value: z(π^t)
             obj_value_sep, obj_value_sep_last = pu.value(prob_sep.objective), obj_value_sep
@@ -417,7 +421,8 @@ class TvAuctionProcessor(object):
             'prices_vcg': prices_vcg,
             'prices_core': prices_core,
             'prices_final': prices_after,
-            'step_info': step_info
+            'step_info': step_info,
+            'gaps': gwd.gaps
         }
      
 if __name__ == '__main__':
@@ -442,8 +447,8 @@ if __name__ == '__main__':
         print parser.format_help()
         sys.exit()
         
-    options = parser.parse_args()[0]
     scenarios = json.decode(sys.stdin.read())
+    options = parser.parse_args()[0]
     
     proc = TvAuctionProcessor()
     if options.price_vector=='vcg': proc.vcgClass = Vcg
@@ -456,5 +461,5 @@ if __name__ == '__main__':
     for scenario in scenarios:
         convertToNamedTuples(scenario)
         slots, bidder_infos = scenario
-        res = proc.solve(slots, bidder_infos)
-        print json.encode(res)    
+        res = proc.solve(slots, bidder_infos, options.time_limit, options.time_limit_gwd, options.epgap)
+        print json.encode(res)
