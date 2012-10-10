@@ -1,12 +1,8 @@
 # -*- coding: utf-8; -*-
 
-from collections import namedtuple, defaultdict
-from pprint import pprint as pp
+from collections import namedtuple
 import logging
-import math
 import pulp as pu
-import random
-import sys
 
 
 SOLVER_MSG = False
@@ -188,17 +184,17 @@ class CorePricing(object):
         prob_ebpo.name = name
         
         # constants: ε (should be 'small enough')
-        epsilon = 1e-31
+        epsilon = 1e-64
         
         # variables: m, π_j 
         m = pu.LpVariable('m',cat=pu.LpContinuous)
         pi = dict((w,pu.LpVariable('pi_%d' % (w,), cat=pu.LpContinuous, lowBound=prices_vcg[w], upBound=bidder_infos[w].budget)) for w in winners)
         
         # add objective function
-        prob_ebpo += sum(pi.itervalues()) # + epsilon*m
+        prob_ebpo += sum(pi.itervalues()) + epsilon*m
         
         # add pi constraints
-        # for w in winners: prob_ebpo += (pi[w]-m <= prices_vcg[w], 'pi_constr_%d' % w)
+        for w in winners: prob_ebpo += (pi[w]-m <= prices_vcg[w], 'pi_constr_%d' % w)
         
         # add coalition constraints for all coalitions without the winning coalition
         if self.algorithm==self.REUSE_COALITIONS:
@@ -425,30 +421,40 @@ class TvAuctionProcessor(object):
         }
      
 if __name__ == '__main__':
-    import json
+    import os
+    import sys
     from optparse import OptionParser
-    parser = OptionParser()
-    parser.add_option('-l','--log', dest='loglevel', help='the log level', default='WARN')
-    parser.add_option('-s','--scenario', dest='scenario', help='the scenario')
-    options = parser.parse_args()[0]
-    numeric_level = getattr(logging, options.loglevel.upper(), None)
-    
-    if not isinstance(numeric_level, int):
-        raise ValueError('Invalid log level: %s' % options.loglevel)
-    if not options.scenario:
-        options.scenario = '[{"1":{"id":1,"price":1.0,"length":120}},{"1":{"id":1,"budget":100,"length":20,"attrib_min":1,"attrib_values":{"1":1}},"2":{"id":2,"budget":100,"length":10,"attrib_min":1,"attrib_values":{"1":1}}}]'
-#        raise ValueError('Scenario needed')
-    
-    logging.basicConfig(level=numeric_level)
-    
-    slots_imported, bidder_infos_imported = json.loads(options.scenario)
-    slots = dict( (s['id'],Slot(**s)) for s in slots_imported.itervalues() )
-    bidder_infos = dict( (b['id'],BidderInfo(**b)) for b in bidder_infos_imported.itervalues() )
-    for bidder_info in bidder_infos.itervalues():
-        attrib_values = bidder_info.attrib_values
-        for av in attrib_values.keys():
-            attrib_values[int(av)] = attrib_values.pop(av)
-    proc = TvAuctionProcessor()
-    res = proc.solve(slots, bidder_infos)
+    from common import json, convertToNamedTuples
 
-    print json.dumps(res,indent=2)    
+    log_level = int(os.environ['LOG_LEVEL']) if 'LOG_LEVEL' in os.environ else logging.WARN
+    logging.basicConfig(level=log_level)
+    
+    parser = OptionParser()
+    parser.set_usage('%prog [options] < scenarios.json')
+    parser.add_option('--initial-vector', dest='price_vector', choices=('vcg','zero'), default='vcg', help='the type of price vector used as a starting point for core price generation (vcg,zero)')
+    parser.add_option('--core-algorithm', dest='core_algorithm', choices=('trim','switch','reuse'), default='reuse', help='which algorithm should be used in case a suboptimal winner determination is discovered during core pricing (trim: trim the values to be within a feasible region, switch: recreate the ebpo,reuse: recreate the ebpo and try to re-use already existing constraints)')
+    parser.add_option('--time-limit-gwd',dest='time_limit_gwd', type='int', default='20', help='the time limit for the initial winner determination problem')
+    parser.add_option('--time-limit',dest='time_limit', type='int', default='20', help='the time limit for all problems but the initial winner determination problem')
+    parser.add_option('--epgap',dest='epgap', type='float', default=None, help='the epgap used for all problems')
+    for option in parser.option_list: 
+        if option.default != ("NO", "DEFAULT"): option.help += (" " if option.help else "") + "[default: %default]"
+    if sys.stdin.isatty():
+        print parser.format_help()
+        sys.exit()
+        
+    options = parser.parse_args()[0]
+    scenarios = json.decode(sys.stdin.read())
+    
+    proc = TvAuctionProcessor()
+    if options.price_vector=='vcg': proc.vcgClass = Vcg
+    elif options.price_vector=='zero': proc.vcgClass = Zero
+    
+    if options.core_algorithm=='trim': proc.core_algorithm = CorePricing.TRIM_VALUES
+    elif options.core_algorithm=='switch': proc.core_algorithm = CorePricing.SWITCH_COALITIONS
+    elif options.core_algorithm=='reuse': proc.core_algorithm = CorePricing.REUSE_COALITIONS
+    
+    for scenario in scenarios:
+        convertToNamedTuples(scenario)
+        slots, bidder_infos = scenario
+        res = proc.solve(slots, bidder_infos)
+        print json.encode(res)    
