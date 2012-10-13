@@ -1,12 +1,8 @@
 # -*- coding: utf-8; -*-
 
-from collections import namedtuple, defaultdict
-from pprint import pprint as pp
+from collections import namedtuple
 import logging
-import math
 import pulp as pu
-import random
-import sys
 
 
 SOLVER_MSG = False
@@ -21,6 +17,8 @@ class Gwd(object):
         self.slots = slots
         self.bidder_infos = bidder_infos
         self.solver = SOLVER_CLASS(msg=SOLVER_MSG)
+        
+        self.gaps = [] # will contain all gaps used during calculation 
         
     def generate(self):
         '''the winner determination, implemented as a multiple knapsack problem'''
@@ -61,8 +59,9 @@ class Gwd(object):
         logging.info('wdp:\tcalculating...')
         
         solver_status = prob.solve(self.solver)
+        self.gaps.append( (prob.name, prob.solver.epgap_actual) )
         _x, y, _cons = prob_vars
-        logging.info('wdp:\tstatus: %s' % pu.LpStatus[solver_status])
+        logging.info('wdp:\tstatus: %s, gap: %.2f' % (pu.LpStatus[solver_status], prob.solver.epgap_actual))
         winners = frozenset(j for (j,y_j) in y.iteritems() if round(y_j.varValue)==1)
         
         revenue_raw = pu.value(prob.objective)
@@ -101,10 +100,9 @@ class InitialPricing(object):
     def __init__(self, gwd):
         self.gwd = gwd
         
-    def getCoalitions(self, revenue_raw, winners, prob_gwd, prob_vars):
+    def getCoalitions(self, revenue_raw, winners, prob_vcg, prob_vars):
         logging.info('vcg:\tcalculating...')
         winners_without_bidders = {}
-        prob_vcg = prob_gwd.deepcopy()
         for w in winners:
             winners_without_bidders[w] = self.solveStep(prob_vcg, prob_vars, w)[0]
         return winners_without_bidders
@@ -136,13 +134,20 @@ class Vcg(InitialPricing):
         
         logging.info('vcg:\tcalculating - without winner %s' % (winner_id,))
         prob_vcg.name = 'vcg_%d' % winner_id
-        prob_vcg.addConstraint(y[winner_id] == 0, 'vcg_%d' % winner_id)
         
-        solver_status = prob_vcg.solve(self.gwd.solver)
-        logging.info('vcg:\tstatus: %s' % pu.LpStatus[solver_status])
-        del prob_vcg.constraints['vcg_%d' % winner_id]
+        # save the original coefficient
+        winner_coeff = prob_vcg.objective.get(y[winner_id])
+        prob_vcg.objective[y[winner_id]] = 0
+        
+        solver_status = prob_vcg.resolve(self.gwd.solver)
+        self.gwd.gaps.append( (prob_vcg.name, prob_vcg.solver.epgap_actual) )
+        logging.info('vcg:\tstatus: %s, gap: %.2f' % (pu.LpStatus[solver_status], prob_vcg.solver.epgap_actual))
         winners_without_w = frozenset(j for (j,y_j) in y.iteritems() if round(y_j.varValue)==1)
         winners_slots = self.gwd.getSlotAssignments(winners_without_w,x)
+        
+        # restore coefficient
+        if winner_coeff is not None: prob_vcg.objective[y[winner_id]] = winner_coeff
+        else: del prob_vcg.objective[y[winner_id]]
         return winners_without_w, winners_slots
     
     def getPriceForBidder(self, budget, revenue_raw, revenue_without_bidder):
@@ -154,25 +159,25 @@ class CorePricing(object):
     SWITCH_COALITIONS=2
     REUSE_COALITIONS=3
 
-    
+
     def __init__(self, gwd, vcg, algorithm=REUSE_COALITIONS):
         self.gwd = gwd
         self.vcg = vcg
         self.algorithm = algorithm
     
     
-    def _createSep(self, name, winners, prices_t, prob_gwd, y):
+    def _modifySep(self, name, winners, prices_t, prob_sep, y):
         # make a copy of prob_gwd, since we are using it as basis
-        prob_sep = prob_gwd.deepcopy()
         prob_sep.name = name
         
-        # build sep t variable and modify objective
-        t = dict((w,pu.LpVariable('t_%d' % (w,), cat=pu.LpBinary)) for w in winners)
-        prob_sep.objective -= sum((self.gwd.bidder_infos[w].budget-prices_t[w])*t[w] for w in winners)
-        
-        # add all sep constraints, setting y_i <= t_i
-        for w in winners: prob_sep += y[w] <= t[w]
-        return prob_sep
+        # modify prices according to prices_t. 
+        for w,price_t in prices_t.iteritems():
+            prob_sep.objective[y[w]] = price_t
+            
+        # all others get their budgets as prices (this is needed because maybe the winning coalition changed)
+        loosers_with_budget = ( (j,bidder_info.budget) for (j,bidder_info) in self.gwd.bidder_infos.iteritems() if j not in winners)
+        for j,budget_j in loosers_with_budget:
+            prob_sep.objective[y[j]] = budget_j
     
     
     def _createEbpo(self, name, winners, coalitions, prices_vcg):
@@ -182,7 +187,7 @@ class CorePricing(object):
         prob_ebpo.name = name
         
         # constants: ε (should be 'small enough')
-        epsilon = 1e-31
+        epsilon = 1e-64
         
         # variables: m, π_j 
         m = pu.LpVariable('m',cat=pu.LpContinuous)
@@ -247,7 +252,8 @@ class CorePricing(object):
         winners_without_bidders = winners_without_bidders.copy()
         
         # we need a prob_vcg because of the generation of vcg prices for new coalition entries
-        prob_vcg = prob_gwd.copy()
+        prob_vcg = prob_gwd
+        prob_sep = prob_gwd
         
         # init ebpo and variables
         prob_ebpo = None
@@ -256,7 +262,7 @@ class CorePricing(object):
         
         
         # get currently highest valued coalition
-        if self.algorithm in (self.REUSE_COALITIONS,self.SWITCH_COALITIONS):
+        if self.algorithm in (self.REUSE_COALITIONS, self.SWITCH_COALITIONS):
             winners, winners_slots = self._updateToBestCoalition(winners, winners_slots, coalitions, winners_without_bidders, prob_vcg, prob_vars)
         revenue_raw = self.gwd.getCoalitionValue(winners)
         
@@ -279,12 +285,13 @@ class CorePricing(object):
         for cnt in xrange(1000):
             
             # create sep
-            prob_sep = self._createSep('sep_%d' % cnt, winners, prices_t, prob_gwd, y)
+            self._modifySep('sep_%d' % cnt, winners, prices_t, prob_sep, y)
             
             # solve it
             logging.info('sep:\tcalculating - step %d' % cnt)
-            solver_status = prob_sep.solve(self.gwd.solver)
-            logging.info('sep:\tstatus: %s' % pu.LpStatus[solver_status])
+            solver_status = prob_sep.resolve(self.gwd.solver)
+            self.gwd.gaps.append( (prob_sep.name, prob_sep.solver.epgap_actual) )
+            logging.info('sep:\tstatus: %s, gap: %.2f' % (pu.LpStatus[solver_status], prob_sep.solver.epgap_actual))
             
             # save the value: z(π^t)
             obj_value_sep, obj_value_sep_last = pu.value(prob_sep.objective), obj_value_sep
@@ -389,8 +396,10 @@ class TvAuctionProcessor(object):
         # solve vcg (only if we trim)
         # the vcg prices/coalitions are generated iteratively in the core class when we switch/reuse coalitions
         vcg = self.vcgClass(gwd)
-        winners_without_bidders = vcg.getCoalitions(revenue_raw, winners, prob_gwd, prob_vars) \
-            if self.core_algorithm == CorePricing.TRIM_VALUES else {}
+        winners_without_bidders = {}
+        if self.core_algorithm == CorePricing.TRIM_VALUES:
+            prob_vcg = prob_gwd
+            winners_without_bidders = vcg.getCoalitions(revenue_raw, winners, prob_vcg, prob_vars)
 
         # solve core pricing problem
         core = self.coreClass(gwd, vcg, self.core_algorithm)
@@ -412,34 +421,48 @@ class TvAuctionProcessor(object):
             'prices_vcg': prices_vcg,
             'prices_core': prices_core,
             'prices_final': prices_after,
-            'step_info': step_info
+            'step_info': step_info,
+            'gaps': gwd.gaps
         }
      
 if __name__ == '__main__':
-    import json
+    import os
+    import sys
     from optparse import OptionParser
-    parser = OptionParser()
-    parser.add_option('-l','--log', dest='loglevel', help='the log level', default='WARN')
-    parser.add_option('-s','--scenario', dest='scenario', help='the scenario')
-    options = parser.parse_args()[0]
-    numeric_level = getattr(logging, options.loglevel.upper(), None)
-    
-    if not isinstance(numeric_level, int):
-        raise ValueError('Invalid log level: %s' % options.loglevel)
-    if not options.scenario:
-        options.scenario = '[{"1":{"id":1,"price":1.0,"length":120}},{"1":{"id":1,"budget":100,"length":20,"attrib_min":1,"attrib_values":{"1":1}},"2":{"id":2,"budget":100,"length":10,"attrib_min":1,"attrib_values":{"1":1}}}]'
-#        raise ValueError('Scenario needed')
-    
-    logging.basicConfig(level=numeric_level)
-    
-    slots_imported, bidder_infos_imported = json.loads(options.scenario)
-    slots = dict( (s['id'],Slot(**s)) for s in slots_imported.itervalues() )
-    bidder_infos = dict( (b['id'],BidderInfo(**b)) for b in bidder_infos_imported.itervalues() )
-    for bidder_info in bidder_infos.itervalues():
-        attrib_values = bidder_info.attrib_values
-        for av in attrib_values.keys():
-            attrib_values[int(av)] = attrib_values.pop(av)
-    proc = TvAuctionProcessor()
-    res = proc.solve(slots, bidder_infos)
+    from common import json, convertToNamedTuples
 
-    print json.dumps(res,indent=2)    
+    log_level = int(os.environ['LOG_LEVEL']) if 'LOG_LEVEL' in os.environ else logging.WARN
+    logging.basicConfig(level=log_level)
+    
+    parser = OptionParser()
+    parser.set_usage('%prog [options] < scenarios.json')
+    parser.add_option('--initial-vector', dest='price_vector', choices=('vcg','zero'), default='vcg', help='the type of price vector used as a starting point for core price generation (vcg,zero)')
+    parser.add_option('--core-algorithm', dest='core_algorithm', choices=('trim','switch','reuse'), default='reuse', help='which algorithm should be used in case a suboptimal winner determination is discovered during core pricing (trim: trim the values to be within a feasible region, switch: recreate the ebpo,reuse: recreate the ebpo and try to re-use already existing constraints)')
+    parser.add_option('--time-limit-gwd',dest='time_limit_gwd', type='int', default='20', help='the time limit for the initial winner determination problem')
+    parser.add_option('--time-limit',dest='time_limit', type='int', default='20', help='the time limit for all problems but the initial winner determination problem')
+    parser.add_option('--epgap',dest='epgap', type='float', default=None, help='the epgap used for all problems')
+    for option in parser.option_list: 
+        if option.default != ("NO", "DEFAULT"): option.help += (" " if option.help else "") + "[default: %default]"
+    if sys.stdin.isatty():
+        print parser.format_help()
+        sys.exit()
+    
+    # parse scenario and options    
+    scenarios = json.decode(sys.stdin.read())
+    convertToNamedTuples(scenario)
+    slots, bidder_infos = scenarios[0]
+
+    options = parser.parse_args()[0]
+    
+    # create processor object and set values
+    proc = TvAuctionProcessor()
+    if options.price_vector=='vcg': proc.vcgClass = Vcg
+    elif options.price_vector=='zero': proc.vcgClass = Zero
+    
+    if options.core_algorithm=='trim': proc.core_algorithm = CorePricing.TRIM_VALUES
+    elif options.core_algorithm=='switch': proc.core_algorithm = CorePricing.SWITCH_COALITIONS
+    elif options.core_algorithm=='reuse': proc.core_algorithm = CorePricing.REUSE_COALITIONS
+    
+    # solve and print
+    res = proc.solve(slots, bidder_infos, options.time_limit, options.time_limit_gwd, options.epgap)
+    print json.encode(res)

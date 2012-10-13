@@ -28,244 +28,9 @@ LINEAR = 1
 QUADRATIC = 2
 SQUARE_ROOT = 3
 
-#FIXED = 'fixed'
-#LINEAR = 'linear'
-#CONSTANT = 'constant'
-#NORMAL = 'normal'
-#UNIFORM = 'uniform'
-
 def minmax(data,minval,maxval):
     return max(min(data,maxval),minval)
  
-class SimulationComponent(object):
-    def __init__(self, slot_qty, bidder_qty):
-        self.slot_qty = slot_qty
-        self.bidder_qty = bidder_qty
-        
-    def getData(self, stype):
-        raise NotImplementedError('implement this')
-    
-    def _findNearest(self,ar,val):
-        idx = (np.abs(ar-val)).argmin()
-        return ar[idx]
-    
-    def _getDataContinuos(self,stype,val_max,qty):
-        half = val_max/2
-        quarter = val_max/4
-        if stype==CONSTANT:
-            return [half]*qty
-        elif stype==UNIFORM:
-            return [random.randint(0,val_max) for _i in xrange(qty)]
-        elif stype==NORMAL:
-            return [minmax(int(random.gauss(half,quarter)), 0, val_max) for _i in xrange(qty)]
-        
-
-class SlotDuration(SimulationComponent):
-    def __init__(self, slot_duration_max, *a, **kw):
-        super(SlotDuration, self).__init__(*a, **kw)
-        self.slot_duration_max = slot_duration_max
-    def getData(self, stype):
-        return self._getDataContinuos(stype, self.slot_duration_max, self.slot_qty)
-    
-class SlotPricePerSecond(SimulationComponent):
-    def __init__(self, slot_price_steps, *a, **kw):
-        super(SlotPricePerSecond, self).__init__(*a, **kw)
-        self.slot_price_steps = np.array(slot_price_steps)
-    def getData(self, stype):
-        if stype==CONSTANT:
-            return [self.slot_price_steps[0]]*self.slot_qty
-        elif stype==UNIFORM:
-            return [random.choice(self.slot_price_steps) for _i in xrange(self.slot_qty)]
-        elif stype==NORMAL:
-            return [
-                self._findNearest(self.slot_price_steps, stats.scoreatpercentile(
-                    self.slot_price_steps,
-                    minmax(random.gauss(50,25),0,100)
-                ))
-                for _i in xrange(self.slot_qty)
-            ]
-class SlotPriceToPrio(SimulationComponent):
-    @staticmethod
-    def _prioFixed(slot_price):
-        return 10.0
-    @staticmethod
-    def _prioLinear(slot_price):
-        return slot_price
-    @staticmethod
-    def _prioQuadratic(slot_price):
-        return slot_price**2
-    @staticmethod
-    def _prioSqrt(slot_price):
-        return int(slot_price**0.5)
-    
-    def __init__(self, slot_prices, *a, **kw):
-        super(SlotPriceToPrio, self).__init__(*a, **kw)
-        self.slot_prices = slot_prices
-        self.prio_functions = {
-            FIXED: SlotPriceToPrio._prioFixed,
-            LINEAR: SlotPriceToPrio._prioLinear,
-            QUADRATIC: SlotPriceToPrio._prioQuadratic,
-            SQUARE_ROOT: SlotPriceToPrio._prioSqrt
-        }
-        
-    def getData(self, stype, prio_type):
-        prio_fn = self.prio_functions[prio_type]
-        res = {}
-        for slot_type, slot_type_prices in self.slot_prices.iteritems():
-            slot_prios = [prio_fn(slot_price) for slot_price in slot_type_prices]
-            if stype==CONSTANT:
-                res[slot_type] = slot_prios
-            elif stype==UNIFORM:
-                res[slot_type] = [random.randint(0,slot_prio*2) for slot_prio in slot_prios]
-            elif stype==NORMAL:
-                res[slot_type] = [round(max(0,random.gauss(slot_prio,slot_prio/2)),2) for slot_prio in slot_prios]
-            elif stype==NORMAL_NARROW:
-                res[slot_type] = [round(max(0,random.gauss(slot_prio,slot_prio*0.2)),2) for slot_prio in slot_prios]
-        return res
-    
-class AdvertDuration(SimulationComponent):
-    def __init__(self, advert_duration_max, *a, **kw):
-        super(AdvertDuration, self).__init__(*a, **kw)
-        self.advert_duration_max = advert_duration_max
-    def getData(self, stype):
-        return self._getDataContinuos(stype, self.advert_duration_max, 1)[0]
-    
-class AdvertPrice(SimulationComponent):
-    def __init__(self, advert_price_max, *a, **kw):
-        super(AdvertPrice, self).__init__(*a, **kw)
-        self.advert_price_max = advert_price_max
-    def getData(self, stype):
-        return self._getDataContinuos(stype, self.advert_price_max, 1)[0]
-
-class CampaignMinPrioSum(SimulationComponent):
-    def __init__(self, campaign_min_prio_range, *a, **kw):
-        super(CampaignMinPrioSum, self).__init__(*a, **kw)
-        self.campaign_min_prio_range = campaign_min_prio_range
-    def getData(self, stype):
-        cmin, cmax = campaign_min_prio_range
-        # data gets already trimmed to boundaries
-        return cmin+self._getDataContinuos(stype, cmax-cmin, 1)[0]
-    
-def generate(slot_qty,bidder_qty,slot_duration_max,advert_duration_max,slot_price_steps,advert_price_max,campaign_min_prio_range):
-    '''starts the main simulation generation for every possible vector.'''
-    
-    # target vectors:
-    
-    # slot duration (constant, normal, uniform)
-    slotDuration = SlotDuration(slot_duration_max, slot_qty, bidder_qty)
-    slot_durations = {}
-    for stype in (CONSTANT,NORMAL,UNIFORM):
-        slot_durations[stype] = slotDuration.getData(stype)
-    
-    # slot price per second (constant, normal, uniform)
-    slotPricePerSecond = SlotPricePerSecond(slot_price_steps, slot_qty, bidder_qty)
-    slot_prices = {}
-    for stype in (CONSTANT,NORMAL,UNIFORM):
-        slot_prices[stype] = slotPricePerSecond.getData(stype)
-        
-    # priority vector depending on slot price (constant, linear, uniform)
-    # fixed_constant: all priorities are the same, independent of the price set
-    # fixed_uniform: all priorities are uniformely distributed, independent of the price set
-    # fixed_normal: all priorities are normally distributed, independent of the price set
-    # linear_constant: all priorities are linearly correlated to the price set
-    # linear_normal: all priorities are linearly correlated to the price set and normally varied between bidders
-    # linear_uniform: all priorities are linearly correlated to the price set and uniformly varied between bidders (+- 100%)
-    priority_bidders = {}
-    slotPriceToPrio = SlotPriceToPrio(slot_prices, slot_qty, bidder_qty)
-    for bidder_id in xrange(bidder_qty):
-        if bidder_id not in priority_bidders: priority_bidders[bidder_id] = {}
-        for stype in (CONSTANT,UNIFORM,NORMAL,NORMAL_NARROW):
-            if stype not in priority_bidders[bidder_id]: priority_bidders[bidder_id][stype] = {}
-            for prio_type in slotPriceToPrio.prio_functions:
-                priority_bidders[bidder_id][stype][prio_type] = slotPriceToPrio.getData(stype, prio_type)
-    
-    # advert duration (constant, normal, uniform)
-    advert_durations = {}
-    advertDuration = AdvertDuration(advert_duration_max, slot_qty, bidder_qty)
-    for bidder_id in xrange(bidder_qty):
-        if bidder_id not in advert_durations: advert_durations[bidder_id] = {}
-        for stype in (CONSTANT,NORMAL,UNIFORM):
-            advert_durations[bidder_id][stype] = advertDuration.getData(stype)
-    
-    # advert price (constant, normal, uniform)
-    advert_prices = {}
-    advertPrice = AdvertPrice(advert_price_max, slot_qty, bidder_qty)
-    for bidder_id in xrange(bidder_qty):
-        if bidder_id not in advert_prices: advert_prices[bidder_id] = {}
-        for stype in (CONSTANT,NORMAL,UNIFORM):
-            advert_prices[bidder_id][stype] = advertPrice.getData(stype)
-    
-    campaign_min_prio_sum = {}
-    campaignMinPrioSum = CampaignMinPrioSum(campaign_min_prio_range, slot_qty, bidder_qty)
-    for bidder_id in xrange(bidder_qty):
-        if bidder_id not in campaign_min_prio_sum: campaign_min_prio_sum[bidder_id] = {}
-        for stype in (CONSTANT,NORMAL,UNIFORM):
-            campaign_min_prio_sum[bidder_id][stype] = campaignMinPrioSum.getData(stype)
-    
-    return (slot_durations, slot_prices, priority_bidders, advert_durations, advert_prices, campaign_min_prio_sum)
-
-
-def drawResult(file_prefix, res):
-
-    fig = plt.figure(None,figsize=(20,6))
-    
-    # the first graph shows all winners and how much they paid
-    ind = np.array(sorted(res['winners']))
-    width = 0.8
-    
-    ax1 = fig.add_subplot(111)
-    ax1.grid(True,axis='y')
-    
-    bars = []
-    bar_labels = []
-    
-    for (nr,(ptype,pcolor)) in enumerate(zip(['raw','vcg','core','final'],[(0,1,1),(0,0,0),(1,0,1),(1,1,0)])):
-        bar_width = width - nr*width*0.2
-        vals = [v for (k,v) in sorted(res['prices_%s' % ptype].iteritems()) if k in ind]
-        bar = ax1.bar(ind-bar_width*0.5, vals, bar_width, color=pcolor,linewidth=0.5)
-        bars.append(bar)
-        bar_labels.append(ptype)
-
-    ax1.set_xticks(ind)
-    ax1.set_xticklabels(ind)
-    ax1.legend(bars, bar_labels, loc='upper center', ncol=4, bbox_to_anchor=(0.5,1.12))
-    
-    fig.savefig(file_prefix+'_1.pdf')
-
-    # the second graph is the step info graph    
-    steps_info = res['step_info']
-    fig = plt.figure(None,figsize=(16,9))
-    ax2 = fig.add_subplot(111)
-    ax2.grid(True,axis='y')
-    
-    step_max = 0
-    tuples_all = {}
-    for what in ('raw','vcg','sep','blocking_coalition','ebpo'):
-        tuples_all[what] = tuples_what = [(nr, step_info[what]) for (nr, step_info) in enumerate(steps_info) if what in step_info]
-        if tuples_what: step_max = max(step_max, *(s for (s,v) in tuples_what))
-        
-    for what in ('raw','vcg','sep','blocking_coalition','ebpo'):
-        tuples_what = tuples_all[what]
-        if not tuples_what: continue
-        if tuples_what[-1][0] != step_max: tuples_what.append( (step_max,None) )
-        
-        steps_what = []
-        values_what = []
-        for nr, (step_what, value_what) in enumerate(tuples_what):
-            if steps_what:
-                step_prev, value_prev = tuples_what[nr-1]
-                for i in range(step_prev+1,step_what):
-                    steps_what.append(i)
-                    values_what.append(value_prev)
-            steps_what.append(step_what)
-            values_what.append(value_what if value_what is not None else value_prev)
-        ax2.plot(steps_what, values_what, '.', drawstyle='steps-post',label=what,linestyle='-', linewidth=2.0, markersize=10.0)
-    
-    
-    ax2.set_xlim(-0.1,step_max+0.1)
-    ax2.legend(loc='upper center',ncol=5,bbox_to_anchor=(0.5,1.09))
-    fig.savefig(file_prefix+'_2.pdf')
-    
 if __name__=='__main__':
     import optparse
     import json
@@ -296,7 +61,7 @@ if __name__=='__main__':
             default=[
 #                [CONSTANT,CONSTANT,CONSTANT,CONSTANT,CONSTANT,CONSTANT,FIXED],
                 [NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,LINEAR],
-#                [CONSTANT,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL_NARROW,LINEAR],
+                [CONSTANT,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL_NARROW,LINEAR],
             ],
             help=   'distributions for the following values:'
                     'slot duration (cnu), advert duration (cnu), '
@@ -386,6 +151,7 @@ if __name__=='__main__':
                 attrib_min=bidder_attrib_min,
                 attrib_values=bidder_prio_values
             )
+#            print bidderInfos[bidder_id].attrib_min, sum(bidderInfos[bidder_id].attrib_values.values())
         
         # calculate statistics about bidder demand
         slots_total_time = sum(s.length for s in slots.itervalues())
@@ -430,7 +196,7 @@ if __name__=='__main__':
         
         print 'solving...'
         calc_duration = -time.clock()
-        res = auction_processor.solve(slots, bidderInfos, 5, 5, None)
+        res = auction_processor.solve(slots, bidderInfos, 60, 120, None)
         
         calc_duration += time.clock()
         print 'duration: %.1f seconds' % calc_duration
