@@ -245,7 +245,7 @@ if __name__=='__main__':
     parser.add_option('--advert-price-max', dest='advert_price_max', type='float', default=120.0, help='advert maximum price (per second)')
     parser.add_option(
         '--random-seeds', dest='random_seeds', type='str', action='callback', callback=convertJson,
-        help='random seeds [json]', default=[1]
+        help='random seeds [json]', default=[1,2,3]
     )
     parser.add_option(
         '--slot-price-steps', dest='slot_price_steps', type='str', action='callback', 
@@ -260,7 +260,7 @@ if __name__=='__main__':
         '--distributions', dest='distributions', type='str', action='callback', callback=convertJson,
         default=[
 #            [CONSTANT,CONSTANT,CONSTANT,CONSTANT,CONSTANT,CONSTANT,FIXED],
-#            [NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,LINEAR],
+            [NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,LINEAR],
             [CONSTANT,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL_NARROW,LINEAR],
         ],
         help=   'distributions for the following values:'
