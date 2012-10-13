@@ -441,6 +441,7 @@ if __name__ == '__main__':
     parser.add_option('--time-limit-gwd',dest='time_limit_gwd', type='int', default='20', help='the time limit for the initial winner determination problem')
     parser.add_option('--time-limit',dest='time_limit', type='int', default='20', help='the time limit for all problems but the initial winner determination problem')
     parser.add_option('--epgap',dest='epgap', type='float', default=None, help='the epgap used for all problems')
+    parser.add_option('--offset',dest='offset', type='int', default=0, help='the scenario offset used')
     for option in parser.option_list: 
         if option.default != ("NO", "DEFAULT"): option.help += (" " if option.help else "") + "[default: %default]"
     if sys.stdin.isatty():
@@ -449,10 +450,11 @@ if __name__ == '__main__':
     
     # parse scenario and options    
     scenarios = json.decode(sys.stdin.read())
-    convertToNamedTuples(scenario)
-    slots, bidder_infos = scenarios[0]
-
     options = parser.parse_args()[0]
+
+    scenario = scenarios[options.offset]
+    convertToNamedTuples(scenario)
+    slots, bidder_infos = scenario
     
     # create processor object and set values
     proc = TvAuctionProcessor()
