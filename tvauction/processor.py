@@ -446,10 +446,15 @@ if __name__ == '__main__':
     if sys.stdin.isatty():
         print parser.format_help()
         sys.exit()
-        
+    
+    # parse scenario and options    
     scenarios = json.decode(sys.stdin.read())
+    convertToNamedTuples(scenario)
+    slots, bidder_infos = scenarios[0]
+
     options = parser.parse_args()[0]
     
+    # create processor object and set values
     proc = TvAuctionProcessor()
     if options.price_vector=='vcg': proc.vcgClass = Vcg
     elif options.price_vector=='zero': proc.vcgClass = Zero
@@ -458,8 +463,6 @@ if __name__ == '__main__':
     elif options.core_algorithm=='switch': proc.core_algorithm = CorePricing.SWITCH_COALITIONS
     elif options.core_algorithm=='reuse': proc.core_algorithm = CorePricing.REUSE_COALITIONS
     
-    for scenario in scenarios:
-        convertToNamedTuples(scenario)
-        slots, bidder_infos = scenario
-        res = proc.solve(slots, bidder_infos, options.time_limit, options.time_limit_gwd, options.epgap)
-        print json.encode(res)
+    # solve and print
+    res = proc.solve(slots, bidder_infos, options.time_limit, options.time_limit_gwd, options.epgap)
+    print json.encode(res)

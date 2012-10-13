@@ -238,8 +238,6 @@ if __name__=='__main__':
     
     def convertJson(opt, opt_str, value, parser): setattr(parser.values, opt.dest, json.loads(value))
     parser = optparse.OptionParser()
-    parser.add_option('--no-draw', dest='draw_results', action='store_false', default=True, help='draw graphs illustrating the allocation and the process')
-    parser.add_option('--no-solve', dest='solve_problems', action='store_false', default=True, help='draw graphs illustrating the allocation and the process')
     parser.add_option('--slot-qty', dest='slot_qty', type='int', default=20, help='slot quantity')
     parser.add_option('--bidder-qty', dest='bidder_qty', type='int', default=40, help='bidder quantity')
     parser.add_option('--slot-duration-max', dest='slot_duration_max', type='int', default=120, help='slot maximum duration')
@@ -287,8 +285,6 @@ if __name__=='__main__':
     distributions = options.distributions
     
     random_seeds = options.random_seeds or [None]
-    draw_results = options.draw_results
-    solve_problems = options.solve_problems
     
     # start generating result
     res = {
