@@ -10,19 +10,19 @@ def analyze(scenario):
         max_count = 0
         # sort its priority vector ascending/descending to get min/max
         
-        total_prio = sum(b.attrib_values.itervalues())
+        attrib_cnt = 0
         sort_by_prio = lambda a: a[1]
         for slot_id,priority in sorted(b.attrib_values.iteritems(), key=sort_by_prio):
             if priority <= 0: continue
-            total_prio -= priority
+            attrib_cnt += priority
             max_count += 1
-            if total_prio < b.attrib_min: break
-        total_prio = sum(b.attrib_values.itervalues())
+            if attrib_cnt >= b.attrib_min: break
+        attrib_cnt = 0
         for slot_id,priority in sorted(b.attrib_values.iteritems(), key=sort_by_prio,reverse=True):
-            if priority <= 0: continue                
-            total_prio -= priority
+            if priority <= 0: continue
+            attrib_cnt += priority
             min_count += 1
-            if total_prio < b.attrib_min: break
+            if attrib_cnt >= b.attrib_min: break
         count_stats = (min_count,max_count,(max_count+min_count)/2)
         len_stats = tuple(b.length*v for v in count_stats)
         bidder_info_stats[b.id] = (count_stats,len_stats)
