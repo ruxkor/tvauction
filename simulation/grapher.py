@@ -130,7 +130,7 @@ if __name__ == '__main__':
             used_random_seed = generated_options['random_seeds'][
                 int(1 + options.offset / len(generated_options['distributions']))
             ]
-            used_distribution = generated_options['distributions'][options.offset-used_random_seed]
+            used_distribution = generated_options['distributions'][options.offset % len(generated_options['random_seeds'])]
             graph_file_scen_prefix = '%s_%s' % ('-'.join(map(str,used_distribution)),used_random_seed)
             graph_file_prefix = '%s_%s' % (graph_file_scen_prefix,graph_file_prefix)
     

@@ -262,7 +262,7 @@ if __name__=='__main__':
         default=[
 #            [CONSTANT,CONSTANT,CONSTANT,CONSTANT,CONSTANT,CONSTANT,FIXED],
             [NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL,LINEAR],
-            [CONSTANT,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL_NARROW,LINEAR],
+#            [CONSTANT,NORMAL,NORMAL,NORMAL,NORMAL,NORMAL_NARROW,LINEAR],
         ],
         help=   'distributions for the following values:'
                 'slot duration (cnu), advert duration (cnu), '
