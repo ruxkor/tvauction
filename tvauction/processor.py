@@ -1,15 +1,10 @@
 # -*- coding: utf-8; -*-
 
-from collections import namedtuple
 import logging
 import pulp as pu
 
-
 SOLVER_MSG = False
 SOLVER_CLASS = pu.GUROBI
-
-Slot = namedtuple('Slot', ('id','price','length'))
-BidderInfo = namedtuple('BidderInfo', ('id','budget','length','attrib_min','attrib_values'))
 
 class Gwd(object):
     '''general winner determination'''

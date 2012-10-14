@@ -1,5 +1,8 @@
 import simplejson
-import processor
+from collections import namedtuple
+
+Slot = namedtuple('Slot', ('id','price','length'))
+BidderInfo = namedtuple('BidderInfo', ('id','budget','length','attrib_min','attrib_values'))
 
 class _JSON(object):
     '''JSON implementation used for en/decoding'''
@@ -29,6 +32,7 @@ def convertToNamedTuples(scenario):
     '''converts the passed scenario IN-PLACE into the respective namedtuples'''
     scenario_slots, scenario_bidders = scenario
     for slot_id,slot_tuple in scenario_slots.iteritems():
-        scenario_slots[slot_id] = processor.Slot(**slot_tuple) 
+        scenario_slots[slot_id] = Slot(**slot_tuple) 
     for bidder_id,bidder_tuple in scenario_bidders.iteritems():
-        scenario_bidders[bidder_id] = processor.BidderInfo(**bidder_tuple)
+        scenario_bidders[bidder_id] = BidderInfo(**bidder_tuple)
+
