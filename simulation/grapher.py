@@ -18,12 +18,12 @@ def drawResult(file_prefix, res):
     bars = []
     bar_labels = []
     
-    for (nr,(ptype,pcolor)) in enumerate(zip(['raw','vcg','core','final'],[(0,1,1),(0,0,0),(1,0,1),(1,1,0)])):
+    for (nr,(ptype,pcolor)) in enumerate(zip(['bid','vcg','core','final'],[(0,1,1),(0,0,0),(1,0,1),(1,1,0)])):
         bar_width = width - nr*width*0.2
         vals = [v for (k,v) in sorted(res['prices_%s' % ptype].iteritems()) if k in ind]
         bar = ax1.bar(ind-bar_width*0.5, vals, bar_width, color=pcolor,linewidth=0.5)
         bars.append(bar)
-        bar_labels.append(ptype if ptype != 'raw' else 'bid')
+        bar_labels.append(ptype)
 
     ax1.set_xticks(ind)
     ax1.set_xticklabels(ind)
@@ -38,11 +38,11 @@ def drawResult(file_prefix, res):
     
     step_max = 0
     tuples_all = {}
-    for what in ('raw','vcg','sep','blocking_coalition','ebpo'):
+    for what in ('bid','vcg','sep','blocking_coalition','ebpo'):
         tuples_all[what] = tuples_what = [(nr, step_info[what]) for (nr, step_info) in enumerate(steps_info) if what in step_info]
         if tuples_what: step_max = max(step_max, *(s for (s,v) in tuples_what))
         
-    for what in ('raw','vcg','sep','blocking_coalition','ebpo'):
+    for what in ('bid','vcg','sep','blocking_coalition','ebpo'):
         tuples_what = tuples_all[what]
         if not tuples_what: continue
         if tuples_what[-1][0] != step_max: tuples_what.append( (step_max,None) )

@@ -59,11 +59,11 @@ class Gwd(object):
         logging.info('wdp:\tstatus: %s, gap: %.2f' % (pu.LpStatus[solver_status], prob.solver.epgap_actual))
         winners = frozenset(j for (j,y_j) in y.iteritems() if round(y_j.varValue)==1)
         
-        revenue_raw = pu.value(prob.objective)
-        prices_raw = dict((w,self.bidder_infos[w].budget) for w in winners)
+        revenue_bid = pu.value(prob.objective)
+        prices_bid = dict((w,self.bidder_infos[w].budget) for w in winners)
         
-        logging.info('raw:\trevenue %d, prices: %s' % (revenue_raw,sorted(prices_raw.iteritems())))
-        return solver_status,(revenue_raw, prices_raw, winners)
+        logging.info('bid:\trevenue %d, prices: %s' % (revenue_bid,sorted(prices_bid.iteritems())))
+        return solver_status,(revenue_bid, prices_bid, winners)
     
     def getSlotAssignments(self, winners, x):
         winners_slots = dict((w,[]) for w in winners)
@@ -95,19 +95,19 @@ class InitialPricing(object):
     def __init__(self, gwd):
         self.gwd = gwd
         
-    def getCoalitions(self, revenue_raw, winners, prob_vcg, prob_vars):
+    def getCoalitions(self, revenue_bid, winners, prob_vcg, prob_vars):
         logging.info('vcg:\tcalculating...')
         winners_without_bidders = {}
         for w in winners:
             winners_without_bidders[w] = self.solveStep(prob_vcg, prob_vars, w)[0]
         return winners_without_bidders
         
-    def getPricesForBidders(self, revenue_raw, winners, winners_without_bidders):
+    def getPricesForBidders(self, revenue_bid, winners, winners_without_bidders):
         bidder_infos = self.gwd.bidder_infos
         res = {}
         for w in winners:
             revenue_without_bidder = sum(bidder_infos[wo].budget for wo in winners_without_bidders[w])
-            res[w] = self.getPriceForBidder(bidder_infos[w].budget, revenue_raw, revenue_without_bidder)
+            res[w] = self.getPriceForBidder(bidder_infos[w].budget, revenue_bid, revenue_without_bidder)
         return res
         
 class Zero(InitialPricing):
@@ -116,7 +116,7 @@ class Zero(InitialPricing):
     def solveStep(self, prob_vcg, prob_vars, winner_id):
         return frozenset(), None
     
-    def getPriceForBidder(self, budget, revenue_raw, revenue_without_bidder):
+    def getPriceForBidder(self, budget, revenue_bid, revenue_without_bidder):
         return 0
     
 class Vcg(InitialPricing):
@@ -145,8 +145,8 @@ class Vcg(InitialPricing):
         else: del prob_vcg.objective[y[winner_id]]
         return winners_without_w, winners_slots
     
-    def getPriceForBidder(self, budget, revenue_raw, revenue_without_bidder):
-        return max(0, budget - max(0, (revenue_raw-revenue_without_bidder)))
+    def getPriceForBidder(self, budget, revenue_bid, revenue_without_bidder):
+        return max(0, budget - max(0, (revenue_bid-revenue_without_bidder)))
     
 class CorePricing(object):
     
@@ -259,10 +259,10 @@ class CorePricing(object):
         # get currently highest valued coalition
         if self.algorithm in (self.REUSE_COALITIONS, self.SWITCH_COALITIONS):
             winners, winners_slots = self._updateToBestCoalition(winners, winners_slots, coalitions, winners_without_bidders, prob_vcg, prob_vars)
-        revenue_raw = self.gwd.getCoalitionValue(winners)
+        revenue_bid = self.gwd.getCoalitionValue(winners)
         
         # init prices_vcg and prices_t
-        prices_vcg = self.vcg.getPricesForBidders(revenue_raw, winners, winners_without_bidders)
+        prices_vcg = self.vcg.getPricesForBidders(revenue_bid, winners, winners_without_bidders)
         prices_t = prices_vcg.copy()
         
         # initialize obj_value_sep and prices_t_sum vars, used for comparisons
@@ -271,7 +271,7 @@ class CorePricing(object):
         blocking_coalition = blocking_coalition_last = None
         
         # store information about the steps (in order to get insights / draw graphs of the process)
-        step_info = [{'raw':revenue_raw,'vcg':sum(prices_vcg.itervalues())}]
+        step_info = [{'bid':revenue_bid,'vcg':sum(prices_vcg.itervalues())}]
         
         # get problem vars
         x, y, _cons = prob_vars
@@ -308,8 +308,8 @@ class CorePricing(object):
                 
             # if there is no ebpo or if the winners changed and we use an appropriate algorithm, recreate the ebpo
             if prob_ebpo is None or self.algorithm in (self.SWITCH_COALITIONS, self.REUSE_COALITIONS) and new_winners:
-                revenue_raw = self.gwd.getCoalitionValue(winners)
-                prices_vcg = self.vcg.getPricesForBidders(revenue_raw, winners, winners_without_bidders)
+                revenue_bid = self.gwd.getCoalitionValue(winners)
+                prices_vcg = self.vcg.getPricesForBidders(revenue_bid, winners, winners_without_bidders)
                 logging.info('ebpo:\tcreating - coalition value: %d, winners: %s' % (self.gwd.getCoalitionValue(winners),sorted(winners)))
                 prob_ebpo, pi = self._createEbpo('ebpo_%d' % cnt, winners, coalitions, prices_vcg)
                 
@@ -338,7 +338,7 @@ class CorePricing(object):
             logging.info('ebpo:\tvalue: %d' % prices_t_sum)
             
             # update step_info
-            step_info.append({'ebpo':prices_t_sum,'sep':obj_value_sep,'raw':revenue_raw,'vcg':sum(prices_vcg.itervalues())})
+            step_info.append({'ebpo':prices_t_sum,'sep':obj_value_sep,'bid':revenue_bid,'vcg':sum(prices_vcg.itervalues())})
             
             # if both z(π^t) == z(π^t-1) and θ^t == θ^t-1, we are in a local optimum we cannot escape
             # proposition: this happens when the gwd returned a suboptimal solution, causing a winner allocation.
@@ -381,7 +381,7 @@ class TvAuctionProcessor(object):
         gwd.solver.timeLimit = timeLimitGwd
         
         # solve gwd
-        _solver_status, (revenue_raw, _prices_raw, winners) = gwd.solve(prob_gwd, prob_vars)
+        _solver_status, (revenue_bid, _prices_bid, winners) = gwd.solve(prob_gwd, prob_vars)
         
         # get the slots for the winners (usually re-set if we switch/reuse coalitions) 
         winners_slots = gwd.getSlotAssignments(winners, x)
@@ -394,7 +394,7 @@ class TvAuctionProcessor(object):
         winners_without_bidders = {}
         if self.core_algorithm == CorePricing.TRIM_VALUES:
             prob_vcg = prob_gwd
-            winners_without_bidders = vcg.getCoalitions(revenue_raw, winners, prob_vcg, prob_vars)
+            winners_without_bidders = vcg.getCoalitions(revenue_bid, winners, prob_vcg, prob_vars)
 
         # solve core pricing problem
         core = self.coreClass(gwd, vcg, self.core_algorithm)
@@ -412,7 +412,7 @@ class TvAuctionProcessor(object):
         return {
             'winners': sorted(winners),
             'winners_slots': winners_slots,
-            'prices_raw': dict((w,bidder_infos[w].budget) for w in winners),
+            'prices_bid': dict((w,bidder_infos[w].budget) for w in winners),
             'prices_vcg': prices_vcg,
             'prices_core': prices_core,
             'prices_final': prices_after,

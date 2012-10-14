@@ -202,7 +202,7 @@ if __name__=='__main__':
         print 'duration: %.1f seconds' % calc_duration
         
         print 'revenues:'
-        for what in ('raw','vcg','core','final'): 
+        for what in ('bid','vcg','core','final'): 
             print '  %s\t%d' % (what, sum(res['prices_%s' % what].itervalues()))
         
         if draw_results:
