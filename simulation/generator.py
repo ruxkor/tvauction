@@ -239,8 +239,8 @@ if __name__=='__main__':
     
     def convertJson(opt, opt_str, value, parser): setattr(parser.values, opt.dest, json.decode(value))
     parser = optparse.OptionParser()
-    parser.add_option('--slot-qty', dest='slot_qty', type='int', default=20, help='slot quantity')
-    parser.add_option('--bidder-qty', dest='bidder_qty', type='int', default=40, help='bidder quantity')
+    parser.add_option('--slot-qty', dest='slot_qty', type='int', default=336, help='slot quantity')
+    parser.add_option('--bidder-qty', dest='bidder_qty', type='int', default=50, help='bidder quantity')
     parser.add_option('--slot-duration-max', dest='slot_duration_max', type='int', default=120, help='slot maximum duration')
     parser.add_option('--advert-duration-max', dest='advert_duration_max', type='int', default=40, help='advert maximum duration')
     parser.add_option('--advert-price-max', dest='advert_price_max', type='float', default=120.0, help='advert maximum price (per second)')
@@ -254,7 +254,7 @@ if __name__=='__main__':
         help='slot price (per second), in steps [json]', callback=convertJson
     )
     parser.add_option(
-        '--campaign-min-prio-range', dest='campaign_min_prio_range', type='str', action='callback', default=[1,50],
+        '--campaign-min-prio-range', dest='campaign_min_prio_range', type='str', action='callback', default=[10,50],
         help='campaign minimum priority vector sum ranges (min/max, as percent) [json]', callback=convertJson
     )
     parser.add_option(
