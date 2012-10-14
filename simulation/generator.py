@@ -11,7 +11,9 @@ import logging
 
 import numpy as np
 from scipy import stats
-import matplotlib.pyplot as plt
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
+from tvauction.common import Slot, BidderInfo
 
 CONSTANT = 0
 UNIFORM = 1
@@ -190,7 +192,7 @@ def pregenerate(slot_qty,bidder_qty,slot_duration_max,advert_duration_max,slot_p
         if bidder_id not in campaign_min_prio_sum: campaign_min_prio_sum[bidder_id] = {}
         for stype in (CONSTANT,NORMAL,UNIFORM):
             campaign_min_prio_sum[bidder_id][stype] = campaignMinPrioSum.getData(stype)
-    
+            
     return (slot_durations, slot_prices, priority_bidders, advert_durations, advert_prices, campaign_min_prio_sum)
 
 def generateScenario(pregen_data):
@@ -199,7 +201,7 @@ def generateScenario(pregen_data):
     d_slot_duration, d_ad_duration, d_slot_price, d_bid_price, d_min_prio, d_inter_prio, d_prio_to_price = distribution
     # generate slot objects
     slots = dict(
-        (slot_id,tvauction.processor.Slot(
+        (slot_id, Slot(
             id=slot_id,
             price=slot_prices[d_slot_price][slot_id],
             length=slot_durations[d_slot_duration][slot_id]
@@ -217,7 +219,7 @@ def generateScenario(pregen_data):
         bidder_prio_values = dict(enumerate(priority_bidders[bidder_id][d_inter_prio][d_prio_to_price][d_slot_price]))
         bidder_ad_duration = advert_durations[bidder_id][d_ad_duration]
         bidder_attrib_min = int(sum(bidder_prio_values.itervalues()) * campaign_min_prio_sum[bidder_id][d_min_prio] / 100)
-        bidder_infos[bidder_id] = tvauction.processor.BidderInfo(
+        bidder_infos[bidder_id] = BidderInfo(
             id=bidder_id,
             budget=advert_prices[bidder_id][d_bid_price] * bidder_ad_duration * bidder_attrib_min,
             length=bidder_ad_duration,
@@ -230,13 +232,12 @@ if __name__=='__main__':
     import optparse
     
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
-    import tvauction.processor
     from tvauction.common import json
 
     log_level = int(os.environ['LOG_LEVEL']) if 'LOG_LEVEL' in os.environ else logging.WARN
     logging.basicConfig(level=log_level)
     
-    def convertJson(opt, opt_str, value, parser): setattr(parser.values, opt.dest, json.loads(value))
+    def convertJson(opt, opt_str, value, parser): setattr(parser.values, opt.dest, json.decode(value))
     parser = optparse.OptionParser()
     parser.add_option('--slot-qty', dest='slot_qty', type='int', default=20, help='slot quantity')
     parser.add_option('--bidder-qty', dest='bidder_qty', type='int', default=40, help='bidder quantity')
@@ -245,7 +246,7 @@ if __name__=='__main__':
     parser.add_option('--advert-price-max', dest='advert_price_max', type='float', default=120.0, help='advert maximum price (per second)')
     parser.add_option(
         '--random-seeds', dest='random_seeds', type='str', action='callback', callback=convertJson,
-        help='random seeds [json]', default=[1,2,3]
+        help='random seeds. if a falsy value is passed, a random seed will be used. [json]', default=[1,2,3]
     )
     parser.add_option(
         '--slot-price-steps', dest='slot_price_steps', type='str', action='callback', 

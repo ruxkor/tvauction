@@ -65,7 +65,6 @@ def drawResult(file_prefix, res):
     fig.savefig(file_prefix+'_steps.pdf')
     
     # gap graph
-    gaps = res['gaps']
     fig = plt.figure(None,figsize=(16,9))
     ax3 = fig.add_subplot(111)
     ax3.grid(True, axis='y')
@@ -81,6 +80,7 @@ def drawResult(file_prefix, res):
         points_x, points_y = zip(*points)
         ax3.plot(points_x, points_y, '.', label=gap_type, linestyle='-', linewidth=2.0, markersize=10.0)
         
+    ax3.set_xlim(-0.5,len(res['gaps'])+0.5)
     ax3.legend(loc='upper center',ncol=len(gaps_by_type),bbox_to_anchor=(0.5,1.09))
     fig.savefig(file_prefix+'_gaps.pdf')
     
