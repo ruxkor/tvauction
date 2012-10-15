@@ -4,12 +4,13 @@ from contextlib import closing
 import matplotlib.pyplot as plt
 import numpy as np
 import re
+import matplotlib
 
-def drawResult(file_prefix, res, scenario):
+def _drawWinners(file_prefix, res, scenario):
     fig = plt.figure(None,figsize=(20,6))
     
     # the first graph shows all winners and how much they paid
-    ind = np.array(sorted(res['winners']))
+    ind = np.array(res['winners'])
     width = 0.8
     
     ax1 = fig.add_subplot(111)
@@ -18,7 +19,7 @@ def drawResult(file_prefix, res, scenario):
     bars = []
     bar_labels = []
     
-    for (nr,(ptype,pcolor)) in enumerate(zip(['bid','vcg','core','final'],[(0,1,1),(0,0,0),(1,0,1),(1,1,0)])):
+    for nr, (ptype,pcolor) in enumerate(zip(['bid','vcg','core','final'],[(0,1,1),(0,0,0),(1,0,1),(1,1,0)])):
         bar_width = width - nr*width*0.2
         vals = [v for (k,v) in sorted(res['prices_%s' % ptype].iteritems()) if k in ind]
         bar = ax1.bar(ind-bar_width*0.5, vals, bar_width, color=pcolor,linewidth=0.5)
@@ -29,7 +30,8 @@ def drawResult(file_prefix, res, scenario):
     ax1.set_xticklabels(ind)
     ax1.legend(bars, bar_labels, loc='upper center', ncol=4, bbox_to_anchor=(0.5,1.12))
     fig.savefig(file_prefix+'_prices.pdf')
-
+    
+def _drawSteps(file_prefix, res, scenario):
     # the second graph is the step info graph    
     steps_info = res['step_info']
     fig = plt.figure(None,figsize=(16,9))
@@ -57,13 +59,14 @@ def drawResult(file_prefix, res, scenario):
                     values_what.append(value_prev)
             steps_what.append(step_what)
             values_what.append(value_what if value_what is not None else value_prev)
-        ax2.plot(steps_what, values_what, '.', drawstyle='steps-post',label=what,linestyle='-', linewidth=2.0, markersize=10.0)
+        ax2.plot(steps_what, values_what, '.', drawstyle='steps-post', label=what, linestyle='-', linewidth=2.0, markersize=10.0)
     
     
     ax2.set_xlim(-0.1,step_max+0.1)
     ax2.legend(loc='upper center',ncol=5,bbox_to_anchor=(0.5,1.09))
     fig.savefig(file_prefix+'_steps.pdf')
-    
+        
+def _drawGaps(file_prefix, res, scenario):
     # gap graph
     fig = plt.figure(None,figsize=(16,9))
     ax3 = fig.add_subplot(111)
@@ -83,19 +86,63 @@ def drawResult(file_prefix, res, scenario):
     ax3.set_xlim(-0.5,len(res['gaps'])+0.5)
     ax3.legend(loc='upper center',ncol=len(gaps_by_type),bbox_to_anchor=(0.5,1.09))
     fig.savefig(file_prefix+'_gaps.pdf')
-    
+        
+def _drawBidderInfos(file_prefix, res, scenario):
     # bidderinfo prices sparklines
     slots, bidder_infos = scenario
     fig = plt.figure(None,figsize=(16,9))
+    fig_legends = []
+    ax_slots = fig.add_subplot(len(bidder_infos)+1, 1, 1)
+    points_x, points_y = zip(*( (s_id,s.price) for (s_id,s) in sorted(slots.iteritems())))
+    ax_slots.plot(points_x, points_y, '-', drawstyle='steps-post', linewidth=0.5, color='grey', label='slots reservce price') 
+    ax_slots.set_xticks([])
+    ax_slots.set_yticks([])
+    ax_slots.set_frame_on(False)
+    fig_legends.append(ax_slots.legend(loc=(-0.1,0),frameon=False,prop={'size':6}))
+    
     for nr, (bidder_id, bidder_info) in enumerate(sorted(bidder_infos.iteritems())):
-        ax_bidder_attribs = fig.add_subplot(len(bidder_infos)/2, 2, nr+1)
-        points_x, points_y = zip(*bidder_info.attrib_values.iteritems())
-        ax_bidder_attribs.plot(points_x, points_y, '-', linewidth=0.5, label='bidder %d' % bidder_id)
+        ax_bidder_attribs = fig.add_subplot(len(bidder_infos)+1, 1, nr+2)
+        points_x, points_y = zip(*sorted(bidder_info.attrib_values.iteritems()))
+        ax_bidder_attribs.plot(points_x, points_y, '-', drawstyle='steps-post', linewidth=0.5, label='bidder %d' % bidder_id)
         ax_bidder_attribs.set_xticks([])
         ax_bidder_attribs.set_yticks([])
         ax_bidder_attribs.set_frame_on(False)
-        ax_bidder_attribs.legend(loc=(-0.15,0),frameon=False,prop={'size':6})
-    fig.savefig(file_prefix+'_bidder_attribs.pdf')
+        fig_legends.append(ax_bidder_attribs.legend(loc=(-0.1,0),frameon=False,prop={'size':6}))
+    fig.savefig(file_prefix+'_bidder_attribs.pdf', bbox_inches='tight', bbox_extra_artists=fig_legends)
+    
+def _drawSlotAssignments(file_prefix, res, scenario):
+    slots, bidder_infos = scenario
+    slots_y = dict((s_id, 0) for s_id in slots)
+    
+    fig = plt.figure(None,figsize=(100,10))
+    ax = fig.add_subplot(111)
+    
+    bidders_data = []
+    for bidder_id, s_assignments in sorted(res['winners_slots'].iteritems()):
+        ad_length = bidder_infos[bidder_id].length
+        bidder_assignment = sorted(s_assignments)
+        bidder_height = [ad_length]*len(s_assignments)
+        bidder_bottom = [s_y for (s_id,s_y) in sorted(slots_y.iteritems()) if s_id in bidder_assignment]
+        bidders_data.append( (bidder_id, bidder_assignment, bidder_height, bidder_bottom) )
+        # incremenet s_y height
+        for s_id,s_y in slots_y.iteritems():
+            if s_id in bidder_assignment:
+                slots_y[s_id] += ad_length
+    for nr, (bidder_id, bidder_assignment, bidder_height, bidder_bottom) in enumerate(bidders_data):
+        bars = ax.bar(bidder_assignment, bidder_height, bottom=bidder_bottom, linewidth=0.5, edgecolor='grey', color=matplotlib.cm.jet(1.*nr/len(bidder_infos)))
+
+#    bars = ax.bar(s_assignments, [ad_length]*len(s_assignments), bottom=sorted([s_y for (s_id,s_y) in slots_y.items() if s_id in s_assignments]))
+    slots_remaining = sorted((s_id,s.length-slots_y[s_id]) for (s_id,s) in slots.iteritems())
+    ax.bar(*zip(*slots_remaining), linewidth=0.5, color='white', edgecolor='grey', bottom=[s_y for (s_id,s_y) in sorted(slots_y.iteritems())])
+    fig.savefig(file_prefix+'_slot_assignments.pdf', bbox_inches='tight')
+
+def drawResult(file_prefix, res, scenario):
+    _drawWinners(file_prefix, res, scenario)
+    _drawSteps(file_prefix, res, scenario)
+    _drawGaps(file_prefix, res, scenario)
+    _drawBidderInfos(file_prefix, res, scenario)
+    _drawSlotAssignments(file_prefix, res, scenario)
+
     
 
     
