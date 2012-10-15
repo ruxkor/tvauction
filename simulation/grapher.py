@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import re
 
-def drawResult(file_prefix, res):
+def drawResult(file_prefix, res, scenario):
     fig = plt.figure(None,figsize=(20,6))
     
     # the first graph shows all winners and how much they paid
@@ -84,13 +84,28 @@ def drawResult(file_prefix, res):
     ax3.legend(loc='upper center',ncol=len(gaps_by_type),bbox_to_anchor=(0.5,1.09))
     fig.savefig(file_prefix+'_gaps.pdf')
     
+    # bidderinfo prices sparklines
+    slots, bidder_infos = scenario
+    fig = plt.figure(None,figsize=(16,9))
+    for nr, (bidder_id, bidder_info) in enumerate(sorted(bidder_infos.iteritems())):
+        ax_bidder_attribs = fig.add_subplot(len(bidder_infos)/2, 2, nr+1)
+        points_x, points_y = zip(*bidder_info.attrib_values.iteritems())
+        ax_bidder_attribs.plot(points_x, points_y, '-', linewidth=0.5, label='bidder %d' % bidder_id)
+        ax_bidder_attribs.set_xticks([])
+        ax_bidder_attribs.set_yticks([])
+        ax_bidder_attribs.set_frame_on(False)
+        ax_bidder_attribs.legend(loc=(-0.15,0),frameon=False,prop={'size':6})
+    fig.savefig(file_prefix+'_bidder_attribs.pdf')
+    
+
+    
 if __name__ == '__main__':
     import sys
     import os
     import optparse
     import hashlib
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
-    from tvauction.common import json
+    from tvauction.common import json, convertToNamedTuples
         
     log_level = int(os.environ['LOG_LEVEL']) if 'LOG_LEVEL' in os.environ else logging.WARN
     logging.basicConfig(level=log_level)
@@ -98,6 +113,7 @@ if __name__ == '__main__':
     parser = optparse.OptionParser()
     parser.set_usage('%prog [options] < result.json')
     parser.add_option('--scenopts', dest='scenopts', type='str', help='the options file used to generate the scenarios')
+    parser.add_option('--scenarios', dest='scenarios', type='str', help='the scenarios file created by the generator')
     parser.add_option('--offset', dest='offset', type='int', default=None, help='the scenario offset')
     parser.add_option('--add-prefix', dest='add_prefix', type='str', help='anything else you would like to add to the graph filenames')
     parser.add_option('--graph-path', dest='graph_path', type='str', default='/tmp/tvauction_graphs', help='the base directory for the graphs. has to exist.')
@@ -130,14 +146,15 @@ if __name__ == '__main__':
             used_random_seed = generated_options['random_seeds'][
                 int(1 + options.offset / len(generated_options['distributions']))
             ]
-            used_distribution = generated_options['distributions'][options.offset % len(generated_options['random_seeds'])]
+            used_distribution = generated_options['distributions'][options.offset - generated_options['random_seeds'].index(used_random_seed)]
             graph_file_scen_prefix = '%s_%s' % ('-'.join(map(str,used_distribution)),used_random_seed)
             graph_file_prefix = '%s_%s' % (graph_file_scen_prefix,graph_file_prefix)
     
-
-    
-    
-    
-    
-    drawResult(options.graph_path+'/run_%s' % graph_file_prefix, result)
+    scenario = None
+    if options.scenarios and options.offset is not None:
+        with closing(open(options.scenarios,'r')) as scenario_file:
+            scenarios = json.decode(scenario_file.read())
+            scenario = scenarios[options.offset]
+            convertToNamedTuples(scenario)
+    drawResult(options.graph_path+'/run_%s' % graph_file_prefix, result, scenario)
     
