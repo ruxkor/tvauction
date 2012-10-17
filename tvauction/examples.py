@@ -1,9 +1,10 @@
-from processor_pulp import Slot, BidderInfo, TvAuctionProcessor
+from common import Slot, BidderInfo
+from processor import TvAuctionProcessor
 import logging
 
 import math
-import processor_pulp
 import datetime
+import processor
 
 slot_amount = 168/4
 bidder_amount = 50/2
@@ -17,14 +18,16 @@ rand_times = [i*3 for i in rand_times]
 
 def example1():
     '''tests core pricing.'''
-    slots = dict((i,Slot(i,1.0,120)) for i in range(3))
+    slots = dict((i,Slot(i,0.0,120)) for i in range(3))
     bidderInfos = dict([
         (0,BidderInfo(0,1000,100,1,dict((i,1) for i in slots))),
         (1,BidderInfo(1,1000,100,1,dict((i,1) for i in slots))),
         (2,BidderInfo(2,1000,100,1,dict((i,1) for i in slots))),
         (3,BidderInfo(3,1800,100,3,dict((i,1) for i in slots))),
     ])
-    return TvAuctionProcessor().solve(slots,bidderInfos)
+    proc = TvAuctionProcessor()
+#    proc.vcgClass = processor.Zero
+    return proc.solve(slots,bidderInfos,100,100,None)
 
 def example2():
     '''tests selective attributes.'''
@@ -59,7 +62,7 @@ def example4():
         in enumerate(zip(rand_increments,rand_lengths,rand_times)[:bidder_amount])
     )
     proc = TvAuctionProcessor()
-    proc.vcgClass = processor_pulp.VcgFake
+    proc.vcgClass = processor.Zero
     return proc.solve(slots,bidderInfos,5,1)
 
 def example5():
@@ -73,7 +76,7 @@ def example5():
         in enumerate(zip(rand_increments,rand_lengths,rand_times)[:bidder_amount])
     )
     proc = TvAuctionProcessor()
-    proc.vcgClass = processor_pulp.VcgFake
+    proc.vcgClass = processor.Zero
 #    return proc.solve(slots,bidderInfos,None,None)
     return proc.solve(slots,bidderInfos,5,2)
 
@@ -88,7 +91,7 @@ def exampleVcg():
         4: BidderInfo(3,1900,100,2,{0:1,1:1,2:1}),
     }
     proc = TvAuctionProcessor()
-    proc.vcgClass = processor_pulp.VcgFake
+    proc.vcgClass = processor.Zero
     res = proc.solve(slots,bidderInfos,None,None)
     
 
@@ -131,7 +134,7 @@ def exampleRealistic1():
         bidderInfos[bidder_id] = BidderInfo(bidder_id, budget, length, reach, slots_reaches)
         
     proc = TvAuctionProcessor()
-    proc.vcgClass = processor_pulp.VcgFake
+    proc.vcgClass = processor.Zero
     return proc.solve(slots,bidderInfos,timeLimit=10)
         
 def generate_random_color():
@@ -142,46 +145,19 @@ def generate_random_color():
         float(random.randint(20,90))/100, 
         random.random()/2+0.5
     )
-
-def drawit(save_path,res):
-    import matplotlib.pyplot as plt
-    import numpy as np
-    ind = np.array(sorted(res['winners']))
-    width = 0.8
-    
-    fig = plt.figure(None,figsize=(20,6))
-    ax = fig.add_subplot(111)
-    ax.grid(True,axis='y')
-    
-    bars = []
-    bar_labels = []
-    
-    for (ptype,pcolor) in zip(['raw','vcg','core','final'],[(0,1,1),(0,0,0),(1,0,1),(1,1,0)]):
-        vals = [v for (k,v) in sorted(res['prices_%s' % ptype].iteritems()) if k in ind]
-#        ax.bar(ind+(nr*width*1.8), vals, width, color=pcolor,alpha=0.3,linewidth=0)
-        bar = ax.bar(ind, vals, width, color=pcolor,alpha=0.5,linewidth=0)
-        bars.append(bar)
-        bar_labels.append(ptype)
-
-    ax.set_xticks(ind+0.4)
-    ax.set_xticklabels(ind)
-    ax.legend(bars,bar_labels)
-    fig.savefig(save_path)
     
 def main():    
     import json
-    ex_fns = [example1,example2,example3,example4,example5][:3]
-    ex_names = ['example1','example2','example3','example4','example5'][:3]
+    ex_fns = [example1,example2,example3,example4,example5][:1]
+    ex_names = ['example1','example2','example3','example4','example5'][:1]
     for ex_n,ex_fn in zip(ex_names,ex_fns):
         print 'running %s' % ex_n
         res = ex_fn()
-        drawit('/tmp/%s.pdf' % ex_n, res)
         print json.dumps(res)
 
 def main_realistic():
     import json
     res = exampleRealistic1()
-    drawit('/tmp/%s.pdf' % 'realistic', res)
     print json.dumps(res)
     
 if __name__=='__main__':
