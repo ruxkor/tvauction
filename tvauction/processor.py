@@ -2,6 +2,7 @@
 
 import logging
 import pulp as pu
+from collections import OrderedDict
 
 SOLVER_MSG = False
 SOLVER_CLASS = pu.GUROBI
@@ -12,7 +13,7 @@ class Gwd(object):
         self.slots = slots
         self.bidder_infos = bidder_infos
         self.solver = SOLVER_CLASS(msg=SOLVER_MSG)
-        
+        self.coalitions = OrderedDict() # will contains all coalition generated during the calculation
         self.gaps = [] # will contain all gaps used during calculation 
         
     def generate(self):
@@ -58,7 +59,7 @@ class Gwd(object):
         _x, y, _cons = prob_vars
         logging.info('wdp:\tstatus: %s, gap: %.2f' % (pu.LpStatus[solver_status], prob.solver.epgap_actual))
         winners = frozenset(j for (j,y_j) in y.iteritems() if round(y_j.varValue)==1)
-        
+        self.addToCoalitions(winners, 'gwd', True)
         revenue_bid = pu.value(prob.objective)
         prices_bid = dict((w,self.bidder_infos[w].budget) for w in winners)
         
@@ -74,6 +75,17 @@ class Gwd(object):
     
     def getCoalitionValue(self, coalition):
         return sum(self.bidder_infos[j].budget for j in coalition) if coalition else 0
+    
+    def addToCoalitions(self, coalition, where, is_new_best=None):
+        if coalition in self.coalitions.keys(): return
+        if not self.coalitions:
+            is_new_best = True
+        elif is_new_best is None:
+            best_coalition = max((c for (c,wb) in self.coalitions.iteritems() if wb[1]),key=self.getCoalitionValue)
+            is_new_best = self.getCoalitionValue(best_coalition) < self.getCoalitionValue(coalition)
+        if is_new_best:
+            logging.info('upd:\tnew coalition: %s', sorted(coalition))
+        self.coalitions[coalition] = (where, is_new_best)
 
     
 class ReservePrice(object):
@@ -99,7 +111,8 @@ class InitialPricing(object):
         logging.info('vcg:\tcalculating...')
         winners_without_bidders = {}
         for w in winners:
-            winners_without_bidders[w] = self.solveStep(prob_vcg, prob_vars, w)[0]
+            winners_without_bidder = winners_without_bidders[w] = self.solveStep(prob_vcg, prob_vars, w)[0]
+            self.gwd.addToCoalitions(winners_without_bidder, self.__class__.__name__)
         return winners_without_bidders
         
     def getPricesForBidders(self, revenue_bid, winners, winners_without_bidders):
@@ -136,9 +149,10 @@ class Vcg(InitialPricing):
         
         solver_status = prob_vcg.resolve(self.gwd.solver)
         self.gwd.gaps.append( (prob_vcg.name, prob_vcg.solver.epgap_actual) )
-        logging.info('vcg:\tstatus: %s, gap: %.2f' % (pu.LpStatus[solver_status], prob_vcg.solver.epgap_actual))
-        winners_without_w = frozenset(j for (j,y_j) in y.iteritems() if round(y_j.varValue)==1)
+        winners_without_w = frozenset(j for (j,y_j) in y.iteritems() if round(y_j.varValue)==1 and j != winner_id)
         winners_slots = self.gwd.getSlotAssignments(winners_without_w,x)
+        logging.info('vcg:\tstatus: %s, gap: %.2f' % (pu.LpStatus[solver_status], prob_vcg.solver.epgap_actual))
+        logging.info('vcg:\twinners: %s', sorted(winners_without_w))
         
         # restore coefficient
         if winner_coeff is not None: prob_vcg.objective[y[winner_id]] = winner_coeff
@@ -182,7 +196,7 @@ class CorePricing(object):
         prob_ebpo.name = name
         
         # constants: ε (should be 'small enough')
-        epsilon = 1e-64
+        epsilon = 1.0 / max(b.budget for (b_id, b) in bidder_infos.iteritems() if b_id in winners)
         
         # variables: m, π_j 
         m = pu.LpVariable('m',cat=pu.LpContinuous)
@@ -202,7 +216,7 @@ class CorePricing(object):
         return prob_ebpo, pi
     
     
-    def _updateToBestCoalition(self, new_coalition, new_coalition_winners_slots, coalitions, winners_without_bidders, prob_vcg, prob_vars):
+    def _updateToBestCoalition(self, where, new_coalition, new_coalition_winners_slots, coalitions, winners_without_bidders, prob_vcg, prob_vars):
         '''iteratively update to the best coalition, generating new coalitions while getting vcg coalitions on the way.
         @param new_coalition: the coalition to add to the set.
         @param new_coalition_winners_slots: thew winners_slots dict for new_coalition
@@ -215,9 +229,10 @@ class CorePricing(object):
         dirty = False
         isBetter = lambda what,compared_to: self.gwd.getCoalitionValue(what) > self.gwd.getCoalitionValue(compared_to)
         
-        if new_coalition:        
-            coalitions.add(new_coalition)
-        if new_coalition and isBetter(new_coalition,best_coalition):
+        coalitions.add(new_coalition)
+        new_coalition_is_better = isBetter(new_coalition,best_coalition)
+        self.gwd.addToCoalitions(new_coalition, where, new_coalition_is_better)
+        if new_coalition_is_better:
             best_coalition = new_coalition
             winners_slots = new_coalition_winners_slots
             coalition_changed = True
@@ -229,7 +244,9 @@ class CorePricing(object):
                 coalition_without_j, coalition_slots_without_j = self.vcg.solveStep(prob_vcg,prob_vars,j)
                 winners_without_bidders[j] = coalition_without_j 
                 coalitions.add(coalition_without_j)
-                if isBetter(coalition_without_j,best_coalition):
+                coalition_without_j_is_better = isBetter(coalition_without_j,best_coalition)
+                self.gwd.addToCoalitions(coalition_without_j, where, coalition_without_j_is_better)
+                if coalition_without_j_is_better:
                     best_coalition = coalition_without_j
                     winners_slots = coalition_slots_without_j
                     coalition_changed = True
@@ -258,7 +275,7 @@ class CorePricing(object):
         
         # get currently highest valued coalition
         if self.algorithm in (self.REUSE_COALITIONS, self.SWITCH_COALITIONS):
-            winners, winners_slots = self._updateToBestCoalition(winners, winners_slots, coalitions, winners_without_bidders, prob_vcg, prob_vars)
+            winners, winners_slots = self._updateToBestCoalition('vcg', winners, winners_slots, coalitions, winners_without_bidders, prob_vcg, prob_vars)
         revenue_bid = self.gwd.getCoalitionValue(winners)
         
         # init prices_vcg and prices_t
@@ -303,7 +320,7 @@ class CorePricing(object):
             
             # check if the blocking coalition is better. if yes update the winning coalition
             if self.algorithm in (self.SWITCH_COALITIONS,self.REUSE_COALITIONS):
-                new_winners, new_winners_slots = self._updateToBestCoalition(blocking_coalition, blocking_coalition_slots, coalitions, winners_without_bidders, prob_vcg, prob_vars)
+                new_winners, new_winners_slots = self._updateToBestCoalition('sep', blocking_coalition, blocking_coalition_slots, coalitions, winners_without_bidders, prob_vcg, prob_vars)
                 if new_winners: winners, winners_slots = new_winners, new_winners_slots
                 
             # if there is no ebpo or if the winners changed and we use an appropriate algorithm, recreate the ebpo
@@ -417,7 +434,8 @@ class TvAuctionProcessor(object):
             'prices_core': prices_core,
             'prices_final': prices_after,
             'step_info': step_info,
-            'gaps': gwd.gaps
+            'gaps': gwd.gaps,
+            'coalitions': [(sorted(w),best) for (w,best) in gwd.coalitions.iteritems()]
         }
      
 if __name__ == '__main__':
