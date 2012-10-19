@@ -311,6 +311,7 @@ class CorePricing(object):
             # check for no blocking coalition exists. if yes, break
             if not obj_value_sep > sum(prices_t.itervalues()):
                 logging.info('sep:\tvalue: %d, blocking: None' % obj_value_sep)
+                step_info.append({'ebpo':prices_t_sum,'sep':obj_value_sep,'bid':revenue_bid,'vcg':sum(prices_vcg.itervalues())})
                 break
             
             # get the blocking coalition
