@@ -143,9 +143,6 @@ def drawResult(file_prefix, res, scenario):
     _drawBidderInfos(file_prefix, res, scenario)
     _drawSlotAssignments(file_prefix, res, scenario)
 
-    
-
-    
 if __name__ == '__main__':
     import sys
     import os
@@ -162,7 +159,7 @@ if __name__ == '__main__':
     parser.add_option('--scenopts', dest='scenopts', type='str', help='the options file used to generate the scenarios')
     parser.add_option('--scenarios', dest='scenarios', type='str', help='the scenarios file created by the generator')
     parser.add_option('--offset', dest='offset', type='int', default=None, help='the scenario offset')
-    parser.add_option('--add-prefix', dest='add_prefix', type='str', help='anything else you would like to add to the graph filenames')
+    parser.add_option('--prefix', dest='add_prefix', type='str', help='anything else you would like to add to the graph filenames')
     parser.add_option('--graph-path', dest='graph_path', type='str', default='/tmp/tvauction_graphs', help='the base directory for the graphs. has to exist.')
     parser.epilog = 'If scenopts and offset is not passed, the first characters of the md5 of the scenario will be used'
     for option in parser.option_list: 
@@ -191,7 +188,7 @@ if __name__ == '__main__':
             generated_options = json.decode(scenopts_file.read())
 #            the generator loops first through all random seeds, and then through all distributions
             used_random_seed = generated_options['random_seeds'][
-                int(1 + options.offset / len(generated_options['distributions']))
+                int(math.ceil(options.offset / len(generated_options['distributions'])))
             ]
             used_distribution = generated_options['distributions'][options.offset - generated_options['random_seeds'].index(used_random_seed)]
             graph_file_scen_prefix = '%s_%s' % ('-'.join(map(str,used_distribution)),used_random_seed)

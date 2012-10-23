@@ -57,7 +57,7 @@ class Gwd(object):
         solver_status = prob.solve(self.solver)
         self.gaps.append( (prob.name, prob.solver.epgap_actual) )
         _x, y, _cons = prob_vars
-        logging.info('wdp:\tstatus: %s, gap: %.2f' % (pu.LpStatus[solver_status], prob.solver.epgap_actual))
+        logging.info('wdp:\tstatus: %s, gap: %.2f' % (pu.LpStatus[solver_status], prob.solver.epgap_actual or -1.0))
         winners = frozenset(j for (j,y_j) in y.iteritems() if round(y_j.varValue)==1)
         self.addToCoalitions(winners, 'gwd', True)
         revenue_bid = pu.value(prob.objective)
@@ -210,7 +210,7 @@ class CorePricing(object):
         
         # add coalition constraints for all coalitions without the winning coalition
         if self.algorithm==self.REUSE_COALITIONS:
-            for c in coalitions-{winners}:
+            for c in coalitions-set(winners):
                 # \sum_{j \in W \setminus C} \pi_j >= \sum_{j \in C} b_j - \sum_{j \in W \cap C} b_j = \sum_{j \in C \setminus W} b_j 
                 prob_ebpo += sum(pi[wnb] for wnb in winners-c) >= sum(bidder_infos[j].budget for j in c-winners)
         return prob_ebpo, pi
@@ -293,6 +293,8 @@ class CorePricing(object):
         # get problem vars
         x, y, _cons = prob_vars
         
+        not_changed_cnt = 0
+        core_reached_cnt = 0
         # abort after 1000 iterations (this should never happen)
         for cnt in xrange(1000):
             
@@ -308,16 +310,22 @@ class CorePricing(object):
             # save the value: z(π^t)
             obj_value_sep, obj_value_sep_last = pu.value(prob_sep.objective), obj_value_sep
             
-            # check for no blocking coalition exists. if yes, break
-            if not obj_value_sep > sum(prices_t.itervalues()):
-                logging.info('sep:\tvalue: %d, blocking: None' % obj_value_sep)
-                step_info.append({'ebpo':prices_t_sum,'sep':obj_value_sep,'bid':revenue_bid,'vcg':sum(prices_vcg.itervalues())})
-                break
-            
             # get the blocking coalition
             blocking_coalition, blocking_coalition_last = frozenset(bidder_id for (bidder_id,y_j) in y.iteritems() if round(y_j.varValue)==1), blocking_coalition
             blocking_coalition_slots = self.gwd.getSlotAssignments(blocking_coalition, x)
             logging.info('sep:\tvalue: %d, coalition: value: %d, members: %s' % (obj_value_sep, self.gwd.getCoalitionValue(blocking_coalition), sorted(blocking_coalition)))
+
+            # check for no blocking coalition exists. if this happened several times, break
+            blocking_coalition_revenue_higher = obj_value_sep > sum(prices_t.itervalues())
+            if not blocking_coalition_revenue_higher and core_reached_cnt > 2:
+                logging.info('sep:\tvalue: %d, blocking: None' % obj_value_sep)
+                step_info.append({'ebpo':prices_t_sum,'sep':obj_value_sep,'bid':revenue_bid,'vcg':sum(prices_vcg.itervalues())})
+                break
+            elif not blocking_coalition_revenue_higher:
+                core_reached_cnt += 1
+                continue
+            else:
+                core_reached_cnt = 0
             
             # check if the blocking coalition is better. if yes update the winning coalition
             if self.algorithm in (self.SWITCH_COALITIONS,self.REUSE_COALITIONS):
@@ -343,7 +351,6 @@ class CorePricing(object):
                 )
             else: raise Exception('logical error')
                 
-                
             # ebpo: solve (this problem can be formulated as a continuous LP).
             logging.info('ebpo:\tcalculating - step %s' % cnt)
             solver_status = prob_ebpo.solve(ebpo_solver)
@@ -360,7 +367,10 @@ class CorePricing(object):
             
             # if both z(π^t) == z(π^t-1) and θ^t == θ^t-1, we are in a local optimum we cannot escape
             # proposition: this happens when the gwd returned a suboptimal solution, causing a winner allocation.
-            if obj_value_sep == obj_value_sep_last and prices_t_sum == prices_t_sum_last and blocking_coalition == blocking_coalition_last:
+            coalition_and_values_identical = obj_value_sep == obj_value_sep_last and prices_t_sum == prices_t_sum_last and blocking_coalition == blocking_coalition_last 
+            if coalition_and_values_identical: not_changed_cnt += 1
+            else: not_changed_cnt = 0
+            if not_changed_cnt > 2:
                 logging.warn('core:\tvalue did not change. aborting.') 
                 break
         else:
@@ -446,6 +456,7 @@ if __name__ == '__main__':
     from common import json, convertToNamedTuples
 
     log_level = int(os.environ['LOG_LEVEL']) if 'LOG_LEVEL' in os.environ else logging.WARN
+    SOLVER_MSG = log_level < logging.INFO 
     logging.basicConfig(level=log_level)
     
     parser = OptionParser()
@@ -480,5 +491,5 @@ if __name__ == '__main__':
     elif options.core_algorithm=='reuse': proc.core_algorithm = CorePricing.REUSE_COALITIONS
     
     # solve and print
-    res = proc.solve(slots, bidder_infos, options.time_limit, options.time_limit_gwd, options.epgap)
+    res = proc.solve(slots, bidder_infos, options.time_limit or None, options.time_limit_gwd or None, options.epgap or None)
     print json.encode(res)
