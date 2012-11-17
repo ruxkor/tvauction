@@ -1,4 +1,5 @@
 import sys
+import re
 import matplotlib
 import matplotlib.pyplot as plt
 import scipy.stats
@@ -39,6 +40,8 @@ def grouped(iterable, n):
 def graph(file_paths):
     for file_path in file_paths:
         with open(file_path,'r') as fh:
+            file_path = re.sub('^(.*)\..*', r'\1', file_path)
+
             dr = csv.reader(fh)
             headers = dr.next()
             
@@ -49,11 +52,11 @@ def graph(file_paths):
             
             def boxplot(nr, qty):
                 fig = plt.figure(None,figsize=(10,5))
-                for (inr,header) in enumerate(headers[nr:nr+qty]): 
+                for (inr,header) in enumerate(headers[nr:nr+qty]):
                     datum = data[:,nr+inr]
-                    ax = fig.add_subplot(1, 2, inr+1)
+                    ax = fig.add_subplot(1, qty, inr+1)
                     ax.boxplot(datum)
-                    ax.locator_params('y', nbins=4)
+                    ax.locator_params('y', nbins=6)
                     ymin, ymax = ax.get_ylim()
                     ax.set_ylim((ymin-0.05*(ymax-ymin), ymax+0.05*(ymax-ymin)))
                     ax.set_xticks([1])
@@ -64,10 +67,10 @@ def graph(file_paths):
                 datum = data[:,nr:nr+50]
                 fig = plt.figure()
                 ax = fig.add_subplot(111)
-                im = ax.imshow(datum, shape=datum.shape, vmin=-0.25, vmax=0.25, cmap=my_cm, interpolation='nearest')
+                im = ax.imshow(datum, shape=datum.shape, vmin=-0.5, vmax=0.5, cmap=my_cm, interpolation='nearest')
                 ax.set_yticks([])
-                ax.set_xticks([0, 12, 25, 37])
-                ax.set_xticklabels(['', 'q25','median','q75'])
+                ax.set_xticks([12, 25, 37])
+                ax.set_xticklabels(['q25','median','q75'])
                 plt.colorbar(im,ax=ax,orientation='horizontal')
                 return fig
             
@@ -76,35 +79,40 @@ def graph(file_paths):
             #   
             # revenue, val_coalition
             fig = boxplot(nr, 2)
-            fig.savefig('%s.%s.svg' % (file_path, 'revs'))
+            fig.savefig('%s_%s.svg' % (file_path, 'revs'), bbox_inches='tight')
             nr += 2
             #
             # iterations, switches
             fig = boxplot(nr, 2)
-            fig.savefig('%s.%s.svg' % (file_path, 'iters'))
+            fig.savefig('%s_%s.svg' % (file_path, 'iters'), bbox_inches='tight')
             nr += 2
             #
             # gwd_gap, sep_gap_last
             # vcg_gap_mean, sep_gap_mean
             nr += 4
             #
-            # vals_final_bid_median, vals_final_vcg_median
+            # vals_bid_final_median, vals_bid_vcg_median, vals_final_vcg_median
             fig = boxplot(nr, 2)
-            fig.savefig('%s.%s.svg' % (file_path, 'medians_bid_final_vcg'))
-            nr += 2
-            
+            fig.savefig('%s_%s.svg' % (file_path, 'medians_bid_final_vcg'), bbox_inches='tight')
+            nr += 3
+
             # 50 x vals_final_bid 0..100
             fig = heatmap(nr, 50)
-            fig.savefig('%s.%s.svg' % (file_path, 'vals_final_bid'))
+            fig.savefig('%s_%s.svg' % (file_path, 'vals_bid_final'), bbox_inches='tight')
             nr += 50
             
             # 50 x vals_final_vcg 0..100
             fig = heatmap(nr, 50)
             nr += 50
-            fig.savefig('%s.%s.svg' % (file_path, 'vals_final_vcg'))
+            fig.savefig('%s_%s.svg' % (file_path, 'vals_bid_vcg'), bbox_inches='tight')
+ 
+            # 50 x vals_final_vcg 0..100
+            fig = heatmap(nr, 50)
+            nr += 50
+            fig.savefig('%s_%s.svg' % (file_path, 'vals_final_vcg'), bbox_inches='tight')
  
 if __name__ == '__main__':
 #    file_paths = sys.argv[1:]
-    file_paths = ['/tmp/pa_20121026_short_long.csv','/tmp/pa_20121026_trim_reuse.csv'][1:]
+    file_paths = ['/tmp/pa_short_long.csv','/tmp/pa_trim_reuse.csv'][1:]
     graph(file_paths)   
     plt.show()
