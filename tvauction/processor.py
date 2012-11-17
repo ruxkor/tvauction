@@ -57,14 +57,13 @@ class Gwd(object):
         solver_status = prob.solve(self.solver)
         self.gaps.append( (prob.name, prob.solver.epgap_actual) )
         _x, y, _cons = prob_vars
-        logging.info('wdp:\tstatus: %s, gap: %.2f' % (pu.LpStatus[solver_status], prob.solver.epgap_actual or -1.0))
         winners = frozenset(j for (j,y_j) in y.iteritems() if round(y_j.varValue)==1)
         self.addToCoalitions(winners, 'gwd', True)
-        revenue_bid = pu.value(prob.objective)
-        prices_bid = dict((w,self.bidder_infos[w].budget) for w in winners)
+        revenue_bid = self.getCoalitionValue(winners)
         
-        logging.info('bid:\trevenue %d, prices: %s' % (revenue_bid,sorted(prices_bid.iteritems())))
-        return solver_status,(revenue_bid, prices_bid, winners)
+        logging.info('wdp:\tstatus: %s, gap: %.2f' % (pu.LpStatus[solver_status], prob.solver.epgap_actual or -1.0))
+        logging.info('bid:\tvalue %d, members: %s' % (revenue_bid, sorted(winners)))
+        return solver_status,(revenue_bid, winners)
     
     def getSlotAssignments(self, winners, x):
         winners_slots = dict((w,[]) for w in winners)
@@ -152,7 +151,7 @@ class Vcg(InitialPricing):
         winners_without_w = frozenset(j for (j,y_j) in y.iteritems() if round(y_j.varValue)==1 and j != winner_id)
         winners_slots = self.gwd.getSlotAssignments(winners_without_w,x)
         logging.info('vcg:\tstatus: %s, gap: %.2f' % (pu.LpStatus[solver_status], prob_vcg.solver.epgap_actual))
-        logging.info('vcg:\twinners: %s', sorted(winners_without_w))
+        logging.info('vcg:\tvalue: %d, members: %s' % (self.gwd.getCoalitionValue(winners_without_w), sorted(winners_without_w)))
         
         # restore coefficient
         if winner_coeff is not None: prob_vcg.objective[y[winner_id]] = winner_coeff
@@ -336,7 +335,7 @@ class CorePricing(object):
             if prob_ebpo is None or self.algorithm in (self.SWITCH_COALITIONS, self.REUSE_COALITIONS) and new_winners:
                 revenue_bid = self.gwd.getCoalitionValue(winners)
                 prices_vcg = self.vcg.getPricesForBidders(revenue_bid, winners, winners_without_bidders)
-                logging.info('ebpo:\tcreating - coalition value: %d, winners: %s' % (self.gwd.getCoalitionValue(winners),sorted(winners)))
+                logging.info('ebpo:\tcreating - coalition value: %d, members: %s' % (self.gwd.getCoalitionValue(winners),sorted(winners)))
                 prob_ebpo, pi = self._createEbpo('ebpo_%d' % cnt, winners, coalitions, prices_vcg)
                 
             # else if the winners did not change and we are using switch/reuse, add the constraint
@@ -395,7 +394,7 @@ class TvAuctionProcessor(object):
         '''solve the wdp and pricing problem.
         
         @param slots:        a dict of Slot objects
-        @param bidder_infos:  a dict of BidderInfo objects
+        @param bidder_infos: a dict of BidderInfo objects
         @param timeLimit:    int|null, sets the time limit for all integer problems.
         @param timeLimitGwd: int|null, lets you override the time limit for the gwd because of its importance. 
         @param epgap:        float|null, is used for all integer problems.'''
@@ -409,7 +408,7 @@ class TvAuctionProcessor(object):
         gwd.solver.timeLimit = timeLimitGwd
         
         # solve gwd
-        _solver_status, (revenue_bid, _prices_bid, winners) = gwd.solve(prob_gwd, prob_vars)
+        _solver_status, (revenue_bid, winners) = gwd.solve(prob_gwd, prob_vars)
         
         # get the slots for the winners (usually re-set if we switch/reuse coalitions) 
         winners_slots = gwd.getSlotAssignments(winners, x)

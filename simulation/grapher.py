@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import re
 import matplotlib
+import math
 
 def _drawWinners(file_prefix, res, scenario):
     fig = plt.figure(None,figsize=(20,6))
@@ -29,7 +30,7 @@ def _drawWinners(file_prefix, res, scenario):
     ax1.set_xticks(ind)
     ax1.set_xticklabels(ind)
     ax1.legend(bars, bar_labels, loc='upper center', ncol=4, bbox_to_anchor=(0.5,1.12))
-    fig.savefig(file_prefix+'_prices.pdf')
+    fig.savefig(file_prefix+'_prices.svg')
     
 def _drawSteps(file_prefix, res, scenario):
     # the second graph is the step info graph    
@@ -64,7 +65,7 @@ def _drawSteps(file_prefix, res, scenario):
     
     ax2.set_xlim(-0.1,step_max+0.1)
     ax2.legend(loc='upper center',ncol=5,bbox_to_anchor=(0.5,1.09))
-    fig.savefig(file_prefix+'_steps.pdf')
+    fig.savefig(file_prefix+'_steps.svg')
         
 def _drawGaps(file_prefix, res, scenario):
     # gap graph
@@ -85,7 +86,7 @@ def _drawGaps(file_prefix, res, scenario):
         
     ax3.set_xlim(-0.5,len(res['gaps'])+0.5)
     ax3.legend(loc='upper center',ncol=len(gaps_by_type),bbox_to_anchor=(0.5,1.09))
-    fig.savefig(file_prefix+'_gaps.pdf')
+    fig.savefig(file_prefix+'_gaps.svg')
         
 def _drawBidderInfos(file_prefix, res, scenario):
     # bidderinfo prices sparklines
@@ -108,7 +109,7 @@ def _drawBidderInfos(file_prefix, res, scenario):
         ax_bidder_attribs.set_yticks([])
         ax_bidder_attribs.set_frame_on(False)
         fig_legends.append(ax_bidder_attribs.legend(loc=(-0.1,0),frameon=False,prop={'size':6}))
-    fig.savefig(file_prefix+'_bidder_attribs.pdf', bbox_inches='tight', bbox_extra_artists=fig_legends)
+    fig.savefig(file_prefix+'_bidder_attribs.svg', bbox_inches='tight', bbox_extra_artists=fig_legends)
     
 def _drawSlotAssignments(file_prefix, res, scenario):
     slots, bidder_infos = scenario
@@ -134,7 +135,7 @@ def _drawSlotAssignments(file_prefix, res, scenario):
 #    bars = ax.bar(s_assignments, [ad_length]*len(s_assignments), bottom=sorted([s_y for (s_id,s_y) in slots_y.items() if s_id in s_assignments]))
     slots_remaining = sorted((s_id,s.length-slots_y[s_id]) for (s_id,s) in slots.iteritems())
     ax.bar(*zip(*slots_remaining), linewidth=0.5, color='white', edgecolor='grey', bottom=[s_y for (s_id,s_y) in sorted(slots_y.iteritems())])
-    fig.savefig(file_prefix+'_slot_assignments.pdf', bbox_inches='tight')
+    fig.savefig(file_prefix+'_slot_assignments.svg', bbox_inches='tight')
 
 def drawResult(file_prefix, res, scenario):
     _drawWinners(file_prefix, res, scenario)

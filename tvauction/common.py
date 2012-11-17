@@ -12,7 +12,7 @@ class _JSON(object):
 
     @staticmethod
     def transformNumericKeys(obj):
-        for k,v in obj.iteritems():
+        for k,v in obj.items():
             try:
                 k_int = int(k)
                 del obj[k]

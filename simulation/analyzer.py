@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+# -*- coding: utf-8; -*-
 # creates analyses about the campaign situation
 import logging
 
