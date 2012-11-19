@@ -29,8 +29,8 @@ def _drawWinners(file_prefix, res, scenario):
 
     ax1.set_xticks(ind)
     ax1.set_xticklabels(ind)
-    ax1.legend(bars, bar_labels, loc='upper center', ncol=4, bbox_to_anchor=(0.5,1.12))
-    fig.savefig(file_prefix+'_prices.svg')
+    ax_legend = ax1.legend(bars, bar_labels, loc='upper center', ncol=4, bbox_to_anchor=(0.5,1.12))
+    fig.savefig(file_prefix+'_prices.svg', bbox_inches='tight', bbox_extra_artists=[ax_legend])
     
 def _drawSteps(file_prefix, res, scenario):
     # the second graph is the step info graph    
@@ -60,12 +60,12 @@ def _drawSteps(file_prefix, res, scenario):
                     values_what.append(value_prev)
             steps_what.append(step_what)
             values_what.append(value_what if value_what is not None else value_prev)
-        ax2.plot(steps_what, values_what, '.', drawstyle='steps-post', label=what, linestyle='-', linewidth=2.0, markersize=10.0)
+        ax2.plot(steps_what, values_what, '.', drawstyle='steps-post',label=what, linestyle='-', linewidth=2.0, markersize=10.0)
     
     
     ax2.set_xlim(-0.1,step_max+0.1)
-    ax2.legend(loc='upper center',ncol=5,bbox_to_anchor=(0.5,1.09))
-    fig.savefig(file_prefix+'_steps.svg')
+    ax_legend = ax2.legend(loc='upper center',ncol=5,bbox_to_anchor=(0.5,1.09))
+    fig.savefig(file_prefix+'_steps.svg', bbox_inches='tight', bbox_extra_artists=[ax_legend])
         
 def _drawGaps(file_prefix, res, scenario):
     # gap graph
@@ -85,8 +85,8 @@ def _drawGaps(file_prefix, res, scenario):
         ax3.plot(points_x, points_y, '.', label=gap_type, linestyle='-', linewidth=2.0, markersize=10.0)
         
     ax3.set_xlim(-0.5,len(res['gaps'])+0.5)
-    ax3.legend(loc='upper center',ncol=len(gaps_by_type),bbox_to_anchor=(0.5,1.09))
-    fig.savefig(file_prefix+'_gaps.svg')
+    ax_legend = ax3.legend(loc='upper center',ncol=len(gaps_by_type),bbox_to_anchor=(0.5,1.09))
+    fig.savefig(file_prefix+'_gaps.svg', bbox_inches='tight', bbox_extra_artists=[ax_legend])
         
 def _drawBidderInfos(file_prefix, res, scenario):
     # bidderinfo prices sparklines
@@ -135,7 +135,7 @@ def _drawSlotAssignments(file_prefix, res, scenario):
 #    bars = ax.bar(s_assignments, [ad_length]*len(s_assignments), bottom=sorted([s_y for (s_id,s_y) in slots_y.items() if s_id in s_assignments]))
     slots_remaining = sorted((s_id,s.length-slots_y[s_id]) for (s_id,s) in slots.iteritems())
     ax.bar(*zip(*slots_remaining), linewidth=0.5, color='white', edgecolor='grey', bottom=[s_y for (s_id,s_y) in sorted(slots_y.iteritems())])
-    fig.savefig(file_prefix+'_slot_assignments.svg', bbox_inches='tight')
+    fig.savefig(file_prefix+'_slot_assignments.svg')
 
 def drawResult(file_prefix, res, scenario):
     _drawWinners(file_prefix, res, scenario)
