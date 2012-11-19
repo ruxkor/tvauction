@@ -250,6 +250,7 @@ class CorePricing(object):
                     winners_slots = coalition_slots_without_j
                     coalition_changed = True
                     dirty = True
+                    break
         return best_coalition if coalition_changed else None, winners_slots
                     
     def _getBestCoalition(self, coalitions):
