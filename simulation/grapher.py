@@ -7,6 +7,18 @@ import re
 import matplotlib
 import math
 
+matplotlib.rc('font', family='serif')
+
+extra_draw_info = {
+    'bid': {'marker':'x', 'linestyle':':', 'markersize':5, 'color':'green'},
+    'vcg': {'marker':'.', 'linestyle':'--', 'markersize':5, 'color':'blue'},
+    'sep': {'marker':'.', 'linestyle':'-', 'markersize':5, 'color':'orange'},
+    'ebpo': {'marker':'.', 'linestyle':'-.', 'markersize':5, 'color':'red'}
+}
+
+extra_draw_info['gwd'] = extra_draw_info['bid'].copy()
+extra_draw_info['gwd']['markersize'] = 8
+
 def _drawWinners(file_prefix, res, scenario):
     fig = plt.figure(None,figsize=(20,6))
     
@@ -35,17 +47,17 @@ def _drawWinners(file_prefix, res, scenario):
 def _drawSteps(file_prefix, res, scenario):
     # the second graph is the step info graph    
     steps_info = res['step_info']
-    fig = plt.figure(None,figsize=(16,9))
+    fig = plt.figure(None,figsize=(10,3))
     ax2 = fig.add_subplot(111)
     ax2.grid(True, axis='y')
     
     step_max = 0
     tuples_all = {}
-    for what in ('bid','vcg','sep','blocking_coalition','ebpo'):
+    for what in ('bid','vcg','sep','ebpo'):
         tuples_all[what] = tuples_what = [(nr, step_info[what]) for (nr, step_info) in enumerate(steps_info) if what in step_info]
         if tuples_what: step_max = max(step_max, *(s for (s,v) in tuples_what))
         
-    for what in ('bid','vcg','sep','blocking_coalition','ebpo'):
+    for what in ('bid','vcg','sep','ebpo'):
         tuples_what = tuples_all[what]
         if not tuples_what: continue
         if tuples_what[-1][0] != step_max: tuples_what.append( (step_max,None) )
@@ -60,16 +72,16 @@ def _drawSteps(file_prefix, res, scenario):
                     values_what.append(value_prev)
             steps_what.append(step_what)
             values_what.append(value_what if value_what is not None else value_prev)
-        ax2.plot(steps_what, values_what, '.', drawstyle='steps-post',label=what, linestyle='-', linewidth=2.0, markersize=10.0)
-    
-    
+        ax2.plot(steps_what, values_what, drawstyle='steps-post',label=what, **extra_draw_info[what])
+    ax2.set_ylabel('Value')
+    ax2.set_xlabel('TRIM - Iteration')
     ax2.set_xlim(-0.1,step_max+0.1)
-    ax_legend = ax2.legend(loc='upper center',ncol=5,bbox_to_anchor=(0.5,1.09))
+    ax_legend = ax2.legend(loc='upper center',ncol=5,bbox_to_anchor=(0.5,1.09), prop={'size':10})
     fig.savefig(file_prefix+'_steps.svg', bbox_inches='tight', bbox_extra_artists=[ax_legend])
         
 def _drawGaps(file_prefix, res, scenario):
     # gap graph
-    fig = plt.figure(None,figsize=(16,9))
+    fig = plt.figure(None,figsize=(10,3))
     ax3 = fig.add_subplot(111)
     ax3.grid(True, axis='y')
     
@@ -82,10 +94,12 @@ def _drawGaps(file_prefix, res, scenario):
      
     for gap_type, points in gaps_by_type.iteritems():
         points_x, points_y = zip(*points)
-        ax3.plot(points_x, points_y, '.', label=gap_type, linestyle='-', linewidth=2.0, markersize=10.0)
+        ax3.plot(points_x, points_y, label=gap_type, linewidth=1.0, **extra_draw_info[gap_type])
         
     ax3.set_xlim(-0.5,len(res['gaps'])+0.5)
-    ax_legend = ax3.legend(loc='upper center',ncol=len(gaps_by_type),bbox_to_anchor=(0.5,1.09))
+    ax3.set_ylabel('MIP Gap')
+    ax3.set_xlabel('Iteration')
+    ax_legend = ax3.legend(loc='upper center',ncol=len(gaps_by_type),bbox_to_anchor=(0.5,1.09), prop={'size':10})
     fig.savefig(file_prefix+'_gaps.svg', bbox_inches='tight', bbox_extra_artists=[ax_legend])
         
 def _drawBidderInfos(file_prefix, res, scenario):
@@ -95,7 +109,7 @@ def _drawBidderInfos(file_prefix, res, scenario):
     fig_legends = []
     ax_slots = fig.add_subplot(len(bidder_infos)+1, 1, 1)
     points_x, points_y = zip(*( (s_id,s.price) for (s_id,s) in sorted(slots.iteritems())))
-    ax_slots.plot(points_x, points_y, '-', drawstyle='steps-post', linewidth=0.5, color='grey', label='slots reservce price') 
+    ax_slots.plot(points_x, points_y, '-', drawstyle='steps-post', linewidth=0.5, color='grey', label='slots reserve price') 
     ax_slots.set_xticks([])
     ax_slots.set_yticks([])
     ax_slots.set_frame_on(False)

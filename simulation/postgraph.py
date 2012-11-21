@@ -11,6 +11,7 @@ from itertools import izip
 import csv
 import pylab
 
+matplotlib.rc('font', family='serif')
 
 cdict = {
     'red': (
@@ -33,7 +34,37 @@ cdict = {
         (1.0, 0.0, 0.0),
     ),
 }
-my_cm = matplotlib.colors.LinearSegmentedColormap('my_cm',cdict,256)
+
+my_cm = matplotlib.colors.LinearSegmentedColormap('my_cm',cdict,400)
+
+cdict = {
+    'red': (
+        (0.0, 0.0, 0.0),
+        (0.3, 0.1, 0.1),
+        (0.5, 1.0, 1.0),
+        (0.7, 1.0, 1.0),
+        (1.0, 1.0, 1.0)
+    ),
+    'green': (
+        (0.0, 0.0, 0.0),
+        (0.3, 0.1, 0.1),
+        (0.5, 1.0, 1.0),
+        (0.7, 0.4, 0.4),
+        (1.0, 0.2, 0.2)
+
+    ),
+    'blue': (
+        (0.0, 0.2, 0.2),
+        (0.3, 0.4, 0.4),
+        (0.5, 1.0, 1.0),
+        (0.7, 0.4, 0.4),
+        (1.0, 0.2, 0.2)
+    ),
+}
+
+my_cm = matplotlib.colors.LinearSegmentedColormap('my_cm_mono',cdict,5)
+
+matplotlib.colors
 def grouped(iterable, n):
     return izip(*[iter(iterable)]*n)
 
@@ -51,8 +82,9 @@ def graph(file_paths):
             data = np.array(data)
             
             def boxplot(nr, qty):
-                fig = plt.figure(None,figsize=(10,5))
+                fig = plt.figure(None,figsize=(10,3))
                 for (inr,header) in enumerate(headers[nr:nr+qty]):
+                    header = header.replace('vals','').replace('_',' ')
                     datum = data[:,nr+inr]
                     ax = fig.add_subplot(1, qty, inr+1)
                     ax.boxplot(datum)
@@ -63,17 +95,20 @@ def graph(file_paths):
                     ax.set_xticklabels([header])
                 return fig
             
-            def heatmap(nr, qty):
-                datum = data[:,nr:nr+50]
-                fig = plt.figure()
-                ax = fig.add_subplot(111)
-                im = ax.imshow(datum, shape=datum.shape, vmin=-0.5, vmax=0.5, cmap=my_cm, interpolation='nearest')
-                ax.set_yticks([])
-                ax.set_xticks([12, 25, 37])
-                ax.set_xticklabels(['q25','median','q75'])
-                plt.colorbar(im,ax=ax,orientation='horizontal')
+            def heatmap(nr, qty, quantiles):
+                fig = plt.figure(figsize=(15,5.5))
+                for (inr, header) in enumerate(headers[nr:nr+(quantiles*qty):quantiles+1]):
+                    header = re.sub('_[0-9]*$','',header).replace('vals','').replace('_',' ')
+                    datum = data[:,nr+inr*quantiles:nr+(inr+1)*quantiles]
+                    ax = fig.add_subplot(1, qty, inr+1, title=header)
+                    im = ax.imshow(datum, aspect=1.5, vmin=-0.5, vmax=0.5, cmap=my_cm, interpolation='nearest')
+                    ax.set_yticks([])
+                    ax.set_xticks([quantiles/4, quantiles/2, 3*quantiles/4])
+                    ax.set_xticklabels(['q25','median','q75'])
+                fig.subplots_adjust(left=0.1,bottom=0.15)
+                cax = fig.add_axes([0.1, 0.1, 0.8, 0.05])
+                fig.colorbar(im,cax=cax,orientation='horizontal')
                 return fig
-            
             
             nr = 0
             #   
@@ -82,7 +117,10 @@ def graph(file_paths):
             fig.savefig('%s_%s.svg' % (file_path, 'revs'), bbox_inches='tight')
             nr += 2
             #
-            # iterations, switches
+            # iterations
+            nr += 1
+            
+            # runtime, switches
             fig = boxplot(nr, 2)
             fig.savefig('%s_%s.svg' % (file_path, 'iters'), bbox_inches='tight')
             nr += 2
@@ -90,29 +128,23 @@ def graph(file_paths):
             # gwd_gap, sep_gap_last
             # vcg_gap_mean, sep_gap_mean
             nr += 4
-            #
+            
             # vals_bid_final_median, vals_bid_vcg_median, vals_final_vcg_median
             fig = boxplot(nr, 2)
             fig.savefig('%s_%s.svg' % (file_path, 'medians_bid_final_vcg'), bbox_inches='tight')
             nr += 3
 
             # 50 x vals_final_bid 0..100
-            fig = heatmap(nr, 50)
-            fig.savefig('%s_%s.svg' % (file_path, 'vals_bid_final'), bbox_inches='tight')
-            nr += 50
+            # 50 x vals_final_vcg 0..100
+            fig = heatmap(nr, 2, 50)
+            fig.savefig('%s_%s.svg' % (file_path, 'vals_bid_ratios'), bbox_inches='tight')
+            nr += 2*50
             
             # 50 x vals_final_vcg 0..100
-            fig = heatmap(nr, 50)
             nr += 50
-            fig.savefig('%s_%s.svg' % (file_path, 'vals_bid_vcg'), bbox_inches='tight')
- 
-            # 50 x vals_final_vcg 0..100
-            fig = heatmap(nr, 50)
-            nr += 50
-            fig.savefig('%s_%s.svg' % (file_path, 'vals_final_vcg'), bbox_inches='tight')
  
 if __name__ == '__main__':
 #    file_paths = sys.argv[1:]
-    file_paths = ['/tmp/pa_short_long.csv','/tmp/pa_trim_reuse.csv'][1:]
+    file_paths = ['/tmp/pa_short_long.csv','/tmp/pa_trim_reuse.csv']
     graph(file_paths)   
     plt.show()
