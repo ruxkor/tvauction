@@ -6,7 +6,7 @@ fi
 [ "$2" == "dumb" ] && DUMB="set terminal dumb; "
 F="$1"
 SEPVALS=$(grep "sep:[[:space:]]*value:" "$F" | sed -r 's/^.*sep:[[:space:]]*value: ([^,]*),.*$/\1/')
-RAWVAL=$(grep "raw:[[:space:]]*revenue" "$F" | sed -r "s/^.*raw:[[:space:]]*revenue ([0-9]*).*$/\1/")
+RAWVAL=$(grep "bid:[[:space:]]*revenue" "$F" | sed -r "s/^.*bid:[[:space:]]*revenue ([0-9]*).*$/\1/")
 RAWVALS=$(echo "$SEPVALS" | sed "s/^.*$/$RAWVAL/")
 { 
 	echo "$RAWVALS"; echo 'e';
