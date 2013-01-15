@@ -8,21 +8,32 @@ from processor import TvAuctionProcessor as proc
 import gevent
 import gevent_zeromq as zmq
 from gevent.queue import Queue
-import threading
+from multiprocessing import Process
 
-class ProcessorTask(threading.Thread):
-    def __init__(self, ctx):
-        threading.Thread.__init__(self)
-        self.socket_supervisor = ctx.socket(zmq.REP)
-        self.socket_supervisor.connect('inproc://processor_task')
+def serialize(data):
+    return json.encode(data)
+
+def unserialize(data):
+    return json.decode(data)
+    
+class ProcessorTask(Process):
+    def __init__(self):
+        Process.__init__(self)
+        self.ctx = zmq.Context()
+        self.socket_supervisor = self.ctx.socket(zmq.REP)
+        self.socket_supervisor.connect('ipc://processor_task')
     def run(self):
         print 'worker'
-        while True:
-            scenario, options = self.socket_supervisor.recv()
+        params = unserialize(self.socket_supervisor.recv())
+        try:
+            scenario, options = params
             convertToNamedTuples(scenario)
             slots, bidder_infos = scenario
-            res = proc.solve(slots, bidder_infos, 300, 300)
-            self.socket_supervisor.send(res)
+            res = proc.solve(slots, bidder_infos, **options)
+            self.socket_supervisor.send((None, res))
+        except Exception, err:
+            self.socket_supervisor.send([err, None])
+
 
 class Supervisor(object):
     def __init__(self, ctx, config):
@@ -31,10 +42,9 @@ class Supervisor(object):
         self.socket_middleware_rr = ctx.socket(zmq.REQ) 
         self.socket_middleware_rr.connect(config.uri_middleware_rr)
         self.socket_worker = ctx.socket(zmq.DEALER)
-        self.socket_worker.bind('inproc://processor_task')
+        self.socket_worker.bind('ipc://processor_task')
         self.queue = Queue()
-        
-        self.free = True
+        self.worker = None
     
     def initialize(self):
         return (
@@ -43,27 +53,24 @@ class Supervisor(object):
             gevent.spawn(self.handleWorker),
         )
     
-    @staticmethod
-    def serialize(data):
-        return json.encode(data)
-    
-    @staticmethod
-    def unserialize(data):
-        return json.decode(data)
+    def isFree(self):
+        return not(self.worker and self.worker.is_alive())
     
     def handleMiddlewareSubscription(self):
         print 'handler1'
         while True:
-            data = Supervisor.unserialize(self.socket_middleware_sub.recv())
+            data = unserialize(self.socket_middleware_sub.recv())
             logging.debug('--middleware--> %s' % data)
             action, params = data
             if action == 'is_free':
-                resp = [action, self.free]
+                resp = [action, self.isFree()]
                 self.queue.put(resp)
-            elif action == 'solve' and self.free:
-                self.free = False
+            elif action == 'solve' and self.isFree():
+                if self.worker: self.worker.terminate()
+                self.worker = ProcessorTask()
+                self.worker.start()
                 self.socket_worker.send("", zmq.SNDMORE)
-                self.socket_worker.send(Supervisor.serialize(params))
+                self.socket_worker.send(serialize(params))
             else:
                 resp = [action, 'error']
                 self.queue.put(resp)
@@ -72,8 +79,8 @@ class Supervisor(object):
         print 'handler2'
         while True:
             data = self.queue.get()
-            self.socket_middleware_rr.send(Supervisor.serialize(data))
-            resp = Supervisor.unserialize(self.socket_middleware_rr.recv())
+            self.socket_middleware_rr.send(serialize(data))
+            resp = unserialize(self.socket_middleware_rr.recv())
             logging.info('response: %s', resp)
     
     def handleWorker(self):
@@ -100,8 +107,6 @@ def main():
     logging.info('started')
     ctx = zmq.Context()
     supervisor = Supervisor(ctx, options)
-    processor_task = ProcessorTask(ctx)
-    processor_task.start()
     gevent.joinall(supervisor.initialize())
 if __name__ == '__main__':
     main()

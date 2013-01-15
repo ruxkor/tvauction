@@ -12,6 +12,7 @@ import csv
 import pylab
 
 matplotlib.rc('font', family='serif')
+matplotlib.rc('text', usetex='true')
 
 cdict = {
     'red': (
@@ -68,6 +69,20 @@ matplotlib.colors
 def grouped(iterable, n):
     return izip(*[iter(iterable)]*n)
 
+def intelliReplace(header):
+    res = header.replace('_',' ')
+    if 'vals ' in res:
+        res = res.replace('vals ','')
+        res = re.sub(r' \d*$','', res)
+        res = re.sub(r'^(\w*) (\w*) (\w*)$', r'\1 / \2 (\3)', res)
+        res = re.sub(r'^(\w*) (\w*)$', r'\1 / \2', res)
+        res = res.replace('bid','$b_j$').replace('vcg','$\pi_j^{vcg}$').replace('final','$\pi_j$')
+        res = res.replace('$ / $',' / ')
+    else:
+        res = re.sub(r'^(\w*) (\w*) (\w*)$', r'\1  \2 (\3)', res)
+    print header, res
+    return res
+
 def graph(file_paths):
     for file_path in file_paths:
         with open(file_path,'r') as fh:
@@ -84,7 +99,7 @@ def graph(file_paths):
             def boxplot(nr, qty):
                 fig = plt.figure(None,figsize=(10,3))
                 for (inr,header) in enumerate(headers[nr:nr+qty]):
-                    header = header.replace('vals','').replace('_',' ')
+                    header = intelliReplace(header)
                     datum = data[:,nr+inr]
                     ax = fig.add_subplot(1, qty, inr+1)
                     ax.boxplot(datum)
@@ -96,9 +111,9 @@ def graph(file_paths):
                 return fig
             
             def heatmap(nr, qty, quantiles):
-                fig = plt.figure(figsize=(15,5.5))
+                fig = plt.figure(figsize=(12,4))
                 for (inr, header) in enumerate(headers[nr:nr+(quantiles*qty):quantiles+1]):
-                    header = re.sub('_[0-9]*$','',header).replace('vals','').replace('_',' ')
+                    header = intelliReplace(header)
                     datum = data[:,nr+inr*quantiles:nr+(inr+1)*quantiles]
                     ax = fig.add_subplot(1, qty, inr+1, title=header)
                     im = ax.imshow(datum, aspect=1.5, vmin=-0.5, vmax=0.5, cmap=my_cm, interpolation='nearest')
@@ -130,13 +145,13 @@ def graph(file_paths):
             nr += 4
             
             # vals_bid_final_median, vals_bid_vcg_median, vals_final_vcg_median
-            fig = boxplot(nr, 2)
+            fig = boxplot(nr, 3)
             fig.savefig('%s_%s.svg' % (file_path, 'medians_bid_final_vcg'), bbox_inches='tight')
             nr += 3
 
             # 50 x vals_final_bid 0..100
             # 50 x vals_final_vcg 0..100
-            fig = heatmap(nr, 2, 50)
+            fig = heatmap(nr, 3, 50)
             fig.savefig('%s_%s.svg' % (file_path, 'vals_bid_ratios'), bbox_inches='tight')
             nr += 2*50
             
@@ -145,6 +160,6 @@ def graph(file_paths):
  
 if __name__ == '__main__':
 #    file_paths = sys.argv[1:]
-    file_paths = ['/tmp/pa_short_long.csv','/tmp/pa_trim_reuse.csv']
+    file_paths = ['/tmp/pa_reuse_trim.csv','/tmp/pa_reuse_reuselong.csv']
     graph(file_paths)   
-    plt.show()
+#    plt.show()
