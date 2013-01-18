@@ -79,8 +79,8 @@ def intelliReplace(header):
         res = res.replace('bid','$b_j$').replace('vcg','$\pi_j^{vcg}$').replace('final','$\pi_j$')
         res = res.replace('$ / $',' / ')
     else:
+        res = res.replace('gwd','wd')
         res = re.sub(r'^(\w*) (\w*) (\w*)$', r'\1  \2 (\3)', res)
-    print header, res
     return res
 
 def graph(file_paths):
@@ -132,17 +132,20 @@ def graph(file_paths):
             fig.savefig('%s_%s.svg' % (file_path, 'revs'), bbox_inches='tight')
             nr += 2
             #
-            # iterations
-            nr += 1
             
+            # iterations
             # runtime, switches
-            fig = boxplot(nr, 2)
+            fig = boxplot(nr, 3)
             fig.savefig('%s_%s.svg' % (file_path, 'iters'), bbox_inches='tight')
-            nr += 2
+            nr += 3
             #
             # gwd_gap, sep_gap_last
+            fig = boxplot(nr, 2)
+            fig.savefig('%s_%s.svg' % (file_path, 'gaps'), bbox_inches='tight')
+            nr += 2
+            
             # vcg_gap_mean, sep_gap_mean
-            nr += 4
+            nr += 2
             
             # vals_bid_final_median, vals_bid_vcg_median, vals_final_vcg_median
             fig = boxplot(nr, 3)
