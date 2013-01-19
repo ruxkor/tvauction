@@ -14,8 +14,8 @@ from supervisor import Supervisor, unserialize, serialize, SupervisorTask
 ctx = zmq.Context()
 
 config = {
-    'uri_pub':'ipc://test_uri_pub.ipc',
-    'uri_rr':'ipc://test_uri_rr.ipc',
+    'uri_pub':'inproc://test_uri_pub',
+    'uri_rr':'inproc://test_uri_rr',
 }
 
 class Test(unittest.TestCase):
