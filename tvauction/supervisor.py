@@ -23,6 +23,7 @@ def unserialize(data):
 class SupervisorTask(Process):
     def __init__(self):
         Process.__init__(self)
+        
     def run(self):
         ctx = tzmq.Context()
         f = open('/tmp/bla','w')
@@ -34,12 +35,16 @@ class SupervisorTask(Process):
         try:
             scenario, options = data
             convertToNamedTuples(scenario)
-            slots, bidder_infos = scenario
-            proc = TvAuctionProcessor()
-            res = proc.solve(slots, bidder_infos, **options)
+            res = self._solve(scenario, options)
             socket_supervisor.send(serialize([None, res]))
         except Exception, err:
             socket_supervisor.send(serialize(['%s' % err, None]))
+            
+    def _solve(self, scenario, options):
+        slots, bidder_infos = scenario
+        proc = TvAuctionProcessor()
+        res = proc.solve(slots, bidder_infos, **options)
+        return res        
 
 
 class Supervisor(object):
@@ -84,10 +89,10 @@ class Supervisor(object):
             logging.debug('handleMiddlewareSubscription\tgot: %s', data)
             action, params = data[0], data[1:]
             if action == 'is_free':
-                resp = [action, self.isFree()]
+                resp = [action, None, self.isFree()]
                 self.queue.put(resp)
             else:
-                resp = [action, 'error']
+                resp = [action, 'unknown action', None]
                 self.queue.put(resp)
     
     def handleMiddlewareReqRep(self):
@@ -107,7 +112,7 @@ class Supervisor(object):
                 self.socket_worker.send('', gzmq.SNDMORE)
                 self.socket_worker.send(serialize(resp))
             elif resp:
-                self.socket_middleware_rr.send(serialize(['in_use', None]))
+                self.socket_middleware_rr.send(serialize(['solve', 'in_use', None]))
                 logging.error('got response but am not free')
     
     def handleWorker(self):
@@ -115,7 +120,7 @@ class Supervisor(object):
             self.socket_worker.recv()
             data = unserialize(self.socket_worker.recv())
             logging.debug('handleWorker\tgot: %s', data)
-            self.queue.put(data)
+            self.queue.put(['solve'] + data)
             
     
 def main():

@@ -9,7 +9,7 @@ import gevent
 import gevent_zeromq as zmq
 
 from common import json,Slot,BidderInfo
-from supervisor import Supervisor, unserialize, serialize
+from supervisor import Supervisor, unserialize, serialize, SupervisorTask
 
 ctx = zmq.Context()
 
@@ -17,7 +17,6 @@ config = {
     'uri_pub':'ipc://test_uri_pub.ipc',
     'uri_rr':'ipc://test_uri_rr.ipc',
 }
-
 
 class Test(unittest.TestCase):
     def generateScenario(self):
@@ -47,10 +46,10 @@ class Test(unittest.TestCase):
         
     def testIsFree(self):
         def send():
-            self.socket_pub.send(serialize(["is_free"]))
+            self.socket_pub.send(serialize(['is_free']))
         def handle():
             data = json.decode(self.socket_rr.recv())
-            self.assertEquals(['is_free', True], data)
+            self.assertEquals(['is_free', None, True], data)
             self.socket_rr.send('{"ui":2}')
         gevent.joinall((
             gevent.spawn(handle), 
@@ -60,10 +59,10 @@ class Test(unittest.TestCase):
     def testIsNotFree(self):
         self.supervisor.isFree = lambda *a: False
         def send():
-            self.socket_pub.send(serialize(["is_free"]))
+            self.socket_pub.send(serialize(['is_free']))
         def handle():
             data = json.decode(self.socket_rr.recv())
-            self.assertEquals(['is_free', False], data)
+            self.assertEquals(['is_free', None, False], data)
             self.socket_rr.send('')
         gevent.joinall((
             gevent.spawn(handle), 
@@ -73,13 +72,13 @@ class Test(unittest.TestCase):
     def testSendEvenIfNotFree(self):
         self.supervisor.isFree = lambda *a: False
         def send():
-            self.socket_pub.send(serialize(["is_free"]))
+            self.socket_pub.send(serialize(['is_free']))
         def handle():
             data = json.decode(self.socket_rr.recv())
-            self.assertEquals(['is_free', False], data)
+            self.assertEquals(['is_free', None, False], data)
             self.socket_rr.send('{"ui":2}')
             data = json.decode(self.socket_rr.recv())
-            self.assertEquals(['in_use', None], data)
+            self.assertEquals(['solve', 'in_use', None], data)
         gevent.joinall((
             gevent.spawn(handle), 
             gevent.spawn(send)
@@ -87,13 +86,13 @@ class Test(unittest.TestCase):
         
     def testSendInvalidData(self):
         def send():
-            self.socket_pub.send(serialize(["is_free"]))
+            self.socket_pub.send(serialize(['is_free']))
         def handle():
             self.socket_rr.recv()
             self.assertTrue(self.supervisor.isFree())
             self.socket_rr.send('["invalid"]')
             data = unserialize(self.socket_rr.recv())
-            self.assertIsNotNone(data[0])
+            self.assertIsNotNone(data[1])
         gevent.joinall((
             gevent.spawn(handle), 
             gevent.spawn(send)
@@ -101,20 +100,48 @@ class Test(unittest.TestCase):
 
     def testSendValidData(self):
         def send():
-            self.socket_pub.send(serialize(["is_free"]))
+            self.socket_pub.send(serialize(['is_free']))
         def handle():
             self.socket_rr.recv()
-            self.assertTrue(self.supervisor.isFree())
             scenario_data = [self.generateScenario(), {}]
             self.socket_rr.send(serialize(scenario_data))
             data = unserialize(self.socket_rr.recv())
-            self.assertIsNone(data[0])
+            self.assertIsNone(data[1])
         gevent.joinall((
             gevent.spawn(handle), 
             gevent.spawn(send)
-        ), timeout=1.0,  raise_error=True)    
-    
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.CRITICAL)
+        ), timeout=1.0,  raise_error=True)
+        
+    def testSendWhileRunning(self):
+        class SleepyWorker(SupervisorTask):
+            def _solve(self, scenario, options):
+                import time
+                time.sleep(0.2)
+                return {}
+        self.supervisor.worker_class = SleepyWorker
+        
+        def send():
+            self.socket_pub.send(serialize(['is_free']))
+        def handle():
+            # first is_free
+            data = unserialize(self.socket_rr.recv())
+            self.assertEquals(['is_free',None,True],data)
+            self.socket_rr.send(serialize([[{},{}], {}]))
+            # second is free
+            data = unserialize(self.socket_rr.recv())
+            self.assertEquals(['is_free',None,False],data)
+            self.socket_rr.send('{}')
+            # result
+            data = unserialize(self.socket_rr.recv())
+            self.assertEquals(['solve',None,{}],data)
+            self.socket_rr.send('{}')
+            
+        gevent.joinall((
+            gevent.spawn(handle), 
+            gevent.spawn(send),
+            gevent.spawn_later(0.1, send)
+        ), timeout=10.0,  raise_error=True)
+        
+logging.basicConfig(level=logging.CRITICAL)
+if __name__ == '__main__':
     unittest.main()
