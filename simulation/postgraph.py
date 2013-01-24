@@ -76,7 +76,7 @@ def intelliReplace(header):
         res = re.sub(r' \d*$','', res)
         res = re.sub(r'^(\w*) (\w*) (\w*)$', r'\1 / \2 (\3)', res)
         res = re.sub(r'^(\w*) (\w*)$', r'\1 / \2', res)
-        res = res.replace('bid','$b_j$').replace('vcg','$\pi_j^{vcg}$').replace('final','$\pi_j$')
+        res = res.replace('bid','$b_k$').replace('vcg','$p_k^{vcg}$').replace('final','$p_k$')
         res = res.replace('$ / $',' / ')
     else:
         res = res.replace('gwd','wd')
