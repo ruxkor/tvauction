@@ -2,7 +2,9 @@ import simplejson
 from collections import namedtuple
 
 Slot = namedtuple('Slot', ('id','price','length'))
-BidderInfo = namedtuple('BidderInfo', ('id','budget','length','attrib_min','attrib_values'))
+BidderInfo = namedtuple('BidderInfo', ('id','length','bids','attrib_values'))
+# bids: [(price, amount),...]
+# attrib_values {slot_id_1: value_1, ...}
 
 class _JSON(object):
     '''JSON implementation used for en/decoding'''

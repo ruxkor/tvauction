@@ -23,7 +23,7 @@ def _drawWinners(file_prefix, res, scenario):
     fig = plt.figure(None,figsize=(20,6))
     
     # the first graph shows all winners and how much they paid
-    ind = np.array(res['winners'])
+    winners = np.array(res['winners'])
     width = 0.8
     
     ax1 = fig.add_subplot(111)
@@ -31,16 +31,15 @@ def _drawWinners(file_prefix, res, scenario):
     
     bars = []
     bar_labels = []
-    
     for nr, (ptype,pcolor) in enumerate(zip(['bid','vcg','core','final'],[(0,1,1),(0,0,0),(1,0,1),(1,1,0)])):
         bar_width = width - nr*width*0.2
-        vals = [v for (k,v) in sorted(res['prices_%s' % ptype].iteritems()) if k in ind]
-        bar = ax1.bar(ind-bar_width*0.5, vals, bar_width, color=pcolor,linewidth=0.5)
+        vals = [sum(v.itervalues()) for (k,v) in sorted(res['prices_%s' % ptype].iteritems()) if k in winners]
+        bar = ax1.bar(winners-bar_width*0.5, vals, bar_width, color=pcolor,linewidth=0.5)
         bars.append(bar)
         bar_labels.append(ptype)
 
-    ax1.set_xticks(ind)
-    ax1.set_xticklabels(ind)
+    ax1.set_xticks(winners)
+    ax1.set_xticklabels(winners)
     ax_legend = ax1.legend(bars, bar_labels, loc='upper center', ncol=4, bbox_to_anchor=(0.5,1.12))
     fig.savefig(file_prefix+'_prices.svg', bbox_inches='tight', bbox_extra_artists=[ax_legend])
     
@@ -182,8 +181,12 @@ if __name__ == '__main__':
     if sys.stdin.isatty():
         print parser.format_help()
         sys.exit()
+        
     options = parser.parse_args(sys.argv)[0]
     result = sys.stdin.read()
+#    options.scenarios = '/tmp/scen.data'
+#    options.scenopts = '/tmp/scen.opts'
+#    result = open('/tmp/scen.result').read()
     
     if not os.path.exists(options.graph_path): 
         raise Exception('%s not existing' % options.graph_path)

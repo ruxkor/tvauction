@@ -29,9 +29,10 @@ def minmax(data,minval,maxval):
     return max(min(data,maxval),minval)
  
 class SimulationComponent(object):
-    def __init__(self, slot_qty, bidder_qty):
+    def __init__(self, slot_qty, bidder_qty, bid_qty):
         self.slot_qty = slot_qty
         self.bidder_qty = bidder_qty
+        self.bid_qty = bid_qty
         
     def getData(self, stype):
         raise NotImplementedError('implement this')
@@ -137,19 +138,19 @@ class CampaignMinPrioSum(SimulationComponent):
         # data gets already trimmed to boundaries
         return cmin+self._getDataContinuos(stype, cmax-cmin, 1)[0]
     
-def pregenerate(slot_qty,bidder_qty,slot_duration_max,advert_duration_max,slot_price_steps,advert_price_max,campaign_min_prio_range):
+def pregenerate(slot_qty,bidder_qty,bid_qty,slot_duration_max,advert_duration_max,slot_price_steps,advert_price_max,campaign_min_prio_range):
     '''starts the main simulation generation for every possible vector.'''
     
     # target vectors:
     
     # slot duration (constant, normal, uniform)
-    slotDuration = SlotDuration(slot_duration_max, slot_qty, bidder_qty)
+    slotDuration = SlotDuration(slot_duration_max, slot_qty, bidder_qty, bid_qty)
     slot_durations = {}
     for stype in (CONSTANT,NORMAL,UNIFORM):
         slot_durations[stype] = slotDuration.getData(stype)
     
     # slot price per second (constant, normal, uniform)
-    slotPricePerSecond = SlotPricePerSecond(slot_price_steps, slot_qty, bidder_qty)
+    slotPricePerSecond = SlotPricePerSecond(slot_price_steps, slot_qty, bidder_qty, bid_qty)
     slot_prices = {}
     for stype in (CONSTANT,NORMAL,UNIFORM):
         slot_prices[stype] = slotPricePerSecond.getData(stype)
@@ -162,7 +163,7 @@ def pregenerate(slot_qty,bidder_qty,slot_duration_max,advert_duration_max,slot_p
     # linear_normal: all priorities are linearly correlated to the price set and normally varied between bidders
     # linear_uniform: all priorities are linearly correlated to the price set and uniformly varied between bidders (+- 100%)
     priority_bidders = {}
-    slotPriceToPrio = SlotPriceToPrio(slot_prices, slot_qty, bidder_qty)
+    slotPriceToPrio = SlotPriceToPrio(slot_prices, slot_qty, bidder_qty, bid_qty)
     for bidder_id in xrange(bidder_qty):
         if bidder_id not in priority_bidders: priority_bidders[bidder_id] = {}
         for stype in (CONSTANT,UNIFORM,NORMAL,NORMAL_NARROW):
@@ -172,7 +173,7 @@ def pregenerate(slot_qty,bidder_qty,slot_duration_max,advert_duration_max,slot_p
     
     # advert duration (constant, normal, uniform)
     advert_durations = {}
-    advertDuration = AdvertDuration(advert_duration_max, slot_qty, bidder_qty)
+    advertDuration = AdvertDuration(advert_duration_max, slot_qty, bidder_qty, bid_qty)
     for bidder_id in xrange(bidder_qty):
         if bidder_id not in advert_durations: advert_durations[bidder_id] = {}
         for stype in (CONSTANT,NORMAL,UNIFORM):
@@ -180,18 +181,18 @@ def pregenerate(slot_qty,bidder_qty,slot_duration_max,advert_duration_max,slot_p
     
     # advert price (constant, normal, uniform)
     advert_prices = {}
-    advertPrice = AdvertPrice(advert_price_max, slot_qty, bidder_qty)
+    advertPrice = AdvertPrice(advert_price_max, slot_qty, bidder_qty, bid_qty)
     for bidder_id in xrange(bidder_qty):
         if bidder_id not in advert_prices: advert_prices[bidder_id] = {}
         for stype in (CONSTANT,NORMAL,UNIFORM):
-            advert_prices[bidder_id][stype] = advertPrice.getData(stype)
+            advert_prices[bidder_id][stype] = tuple(advertPrice.getData(stype) for i in range(bid_qty))
     
     campaign_min_prio_sum = {}
-    campaignMinPrioSum = CampaignMinPrioSum(campaign_min_prio_range, slot_qty, bidder_qty)
+    campaignMinPrioSum = CampaignMinPrioSum(campaign_min_prio_range, slot_qty, bidder_qty, bid_qty)
     for bidder_id in xrange(bidder_qty):
         if bidder_id not in campaign_min_prio_sum: campaign_min_prio_sum[bidder_id] = {}
         for stype in (CONSTANT,NORMAL,UNIFORM):
-            campaign_min_prio_sum[bidder_id][stype] = campaignMinPrioSum.getData(stype)
+            campaign_min_prio_sum[bidder_id][stype] = tuple(campaignMinPrioSum.getData(stype) for i in range(bid_qty))
             
     return (slot_durations, slot_prices, priority_bidders, advert_durations, advert_prices, campaign_min_prio_sum)
 
@@ -218,12 +219,16 @@ def generateScenario(pregen_data):
     for bidder_id in xrange(bidder_qty):
         bidder_prio_values = dict(enumerate(priority_bidders[bidder_id][d_inter_prio][d_prio_to_price][d_slot_price]))
         bidder_ad_duration = advert_durations[bidder_id][d_ad_duration]
-        bidder_attrib_min = int(sum(bidder_prio_values.itervalues()) * campaign_min_prio_sum[bidder_id][d_min_prio] / 100)
+        
+        bidder_bids = []
+        for i in range(bid_qty):
+            bidder_attrib_min = int(sum(bidder_prio_values.itervalues()) * campaign_min_prio_sum[bidder_id][d_min_prio][i] / 100)
+            bidder_bid_price = advert_prices[bidder_id][d_bid_price][i] * bidder_ad_duration * bidder_attrib_min
+            bidder_bids.append((bidder_bid_price,bidder_attrib_min))
         bidder_infos[bidder_id] = BidderInfo(
             id=bidder_id,
-            budget=advert_prices[bidder_id][d_bid_price] * bidder_ad_duration * bidder_attrib_min,
             length=bidder_ad_duration,
-            attrib_min=bidder_attrib_min,
+            bids=tuple(bidder_bids),
             attrib_values=bidder_prio_values
         )
     return (slots, bidder_infos) 
@@ -241,6 +246,7 @@ if __name__=='__main__':
     parser = optparse.OptionParser()
     parser.add_option('--slot-qty', dest='slot_qty', type='int', default=336, help='slot quantity')
     parser.add_option('--bidder-qty', dest='bidder_qty', type='int', default=50, help='bidder quantity')
+    parser.add_option('--bid-qty', dest='bid_qty', type='int', default=2, help='bid quantity')
     parser.add_option('--slot-duration-max', dest='slot_duration_max', type='int', default=120, help='slot maximum duration')
     parser.add_option('--advert-duration-max', dest='advert_duration_max', type='int', default=40, help='advert maximum duration')
     parser.add_option('--advert-price-max', dest='advert_price_max', type='float', default=120.0, help='advert maximum price (per second)')
@@ -278,6 +284,7 @@ if __name__=='__main__':
 
     slot_qty = options.slot_qty
     bidder_qty = options.bidder_qty
+    bid_qty = options.bid_qty
     slot_duration_max = options.slot_duration_max 
     advert_duration_max = options.advert_duration_max
     advert_price_max = options.advert_price_max
@@ -300,6 +307,7 @@ if __name__=='__main__':
         pregen_data = pregenerate(
              slot_qty,
              bidder_qty,
+             bid_qty,
              slot_duration_max,
              advert_duration_max,
              slot_price_steps,
