@@ -23,7 +23,8 @@ def _drawWinners(file_prefix, res, scenario):
     fig = plt.figure(None,figsize=(20,6))
     
     # the first graph shows all winners and how much they paid
-    winners = np.array(res['winners'])
+    winners = res['winners']
+    winners_index = np.array([k for (k,j) in res['winners']])
     width = 0.8
     
     ax1 = fig.add_subplot(111)
@@ -33,13 +34,13 @@ def _drawWinners(file_prefix, res, scenario):
     bar_labels = []
     for nr, (ptype,pcolor) in enumerate(zip(['bid','vcg','core','final'],[(0,1,1),(0,0,0),(1,0,1),(1,1,0)])):
         bar_width = width - nr*width*0.2
-        vals = [sum(v.itervalues()) for (k,v) in sorted(res['prices_%s' % ptype].iteritems()) if k in winners]
-        bar = ax1.bar(winners-bar_width*0.5, vals, bar_width, color=pcolor,linewidth=0.5)
+        vals = [v for (kj,v) in sorted(res['prices_%s' % ptype].iteritems()) if kj in winners]
+        bar = ax1.bar(winners_index-bar_width*0.5, vals, bar_width, color=pcolor,linewidth=0.5)
         bars.append(bar)
         bar_labels.append(ptype)
 
-    ax1.set_xticks(winners)
-    ax1.set_xticklabels(winners)
+    ax1.set_xticks(winners_index)
+    ax1.set_xticklabels(winners_index)
     ax_legend = ax1.legend(bars, bar_labels, loc='upper center', ncol=4, bbox_to_anchor=(0.5,1.12))
     fig.savefig(file_prefix+'_prices.svg', bbox_inches='tight', bbox_extra_artists=[ax_legend])
     
@@ -114,10 +115,10 @@ def _drawBidderInfos(file_prefix, res, scenario):
     ax_slots.set_frame_on(False)
     fig_legends.append(ax_slots.legend(loc=(-0.1,0),frameon=False,prop={'size':6}))
     
-    for nr, (bidder_id, bidder_info) in enumerate(sorted(bidder_infos.iteritems())):
+    for nr, (k, bidder_info) in enumerate(sorted(bidder_infos.iteritems())):
         ax_bidder_attribs = fig.add_subplot(len(bidder_infos)+1, 1, nr+2)
         points_x, points_y = zip(*sorted(bidder_info.attrib_values.iteritems()))
-        ax_bidder_attribs.plot(points_x, points_y, '-', drawstyle='steps-post', linewidth=0.5, label='bidder %d' % bidder_id)
+        ax_bidder_attribs.plot(points_x, points_y, '-', drawstyle='steps-post', linewidth=0.5, label='bidder %d' % k)
         ax_bidder_attribs.set_xticks([])
         ax_bidder_attribs.set_yticks([])
         ax_bidder_attribs.set_frame_on(False)
@@ -132,17 +133,17 @@ def _drawSlotAssignments(file_prefix, res, scenario):
     ax = fig.add_subplot(111)
     
     bidders_data = []
-    for bidder_id, s_assignments in sorted(res['winners_slots'].iteritems()):
-        ad_length = bidder_infos[bidder_id].length
+    for (k,j), s_assignments in sorted(res['winners_slots'].iteritems()):
+        ad_length = bidder_infos[k].length
         bidder_assignment = sorted(s_assignments)
         bidder_height = [ad_length]*len(s_assignments)
         bidder_bottom = [s_y for (s_id,s_y) in sorted(slots_y.iteritems()) if s_id in bidder_assignment]
-        bidders_data.append( (bidder_id, bidder_assignment, bidder_height, bidder_bottom) )
+        bidders_data.append( (k, bidder_assignment, bidder_height, bidder_bottom) )
         # incremenet s_y height
         for s_id,s_y in slots_y.iteritems():
             if s_id in bidder_assignment:
                 slots_y[s_id] += ad_length
-    for nr, (bidder_id, bidder_assignment, bidder_height, bidder_bottom) in enumerate(bidders_data):
+    for nr, (k, bidder_assignment, bidder_height, bidder_bottom) in enumerate(bidders_data):
         bars = ax.bar(bidder_assignment, bidder_height, bottom=bidder_bottom, linewidth=0.5, edgecolor='grey', color=matplotlib.cm.jet(1.*nr/len(bidder_infos)))
 
 #    bars = ax.bar(s_assignments, [ad_length]*len(s_assignments), bottom=sorted([s_y for (s_id,s_y) in slots_y.items() if s_id in s_assignments]))
@@ -162,6 +163,7 @@ if __name__ == '__main__':
     import os
     import optparse
     import hashlib
+    import cPickle
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
     from tvauction.common import json, convertToNamedTuples
         
@@ -169,7 +171,7 @@ if __name__ == '__main__':
     logging.basicConfig(level=log_level)
     
     parser = optparse.OptionParser()
-    parser.set_usage('%prog [options] < result.json')
+    parser.set_usage('%prog [options] < result.pickle')
     parser.add_option('--scenopts', dest='scenopts', type='str', help='the options file used to generate the scenarios')
     parser.add_option('--scenarios', dest='scenarios', type='str', help='the scenarios file created by the generator')
     parser.add_option('--offset', dest='offset', type='int', default=None, help='the scenario offset')
@@ -198,7 +200,7 @@ if __name__ == '__main__':
     if options.add_prefix: graph_file_prefix += options.add_prefix
         
     # decode the whole result as object
-    result = json.decode(result)
+    result = cPickle.loads(result)
     
     # prefix it with infos about the scenario if available
     if options.scenopts and options.offset is not None:

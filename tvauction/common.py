@@ -11,9 +11,24 @@ class _JSON(object):
     def __init__(self):
         self.encoder = simplejson.JSONEncoder(ensure_ascii=False,separators=(',', ':'))
         self.decoder = simplejson.JSONDecoder(object_hook=self.transformNumericKeys)
-
-    @staticmethod
-    def transformNumericKeys(obj):
+        
+    @classmethod
+    def transformTuplesToStrings(cls, obj):
+        for k,v in obj.items():
+            if type(k) in (set,frozenset):
+                obj[str(k)] = v
+                del obj[k]
+    
+    @classmethod
+    def transformStringsToTuples(cls, obj):
+        for k,v in obj.items():
+            if k[0] == '(' and k[-1] == ')' and ',' in k:
+                k_new = tuple(int(v) for v in k[1:-1].split(',') if len(v))
+                obj[k_new] = v
+                del obj[k]
+                
+    @classmethod
+    def transformNumericKeys(cls, obj):
         for k,v in obj.items():
             try:
                 k_int = int(k)
@@ -21,6 +36,11 @@ class _JSON(object):
                 obj[k_int] = v
             except ValueError: pass
         return obj
+    
+    @classmethod
+    def transformBack(cls, obj):
+        cls.transformNumericKeys(obj)
+        cls.transformStringsToTuples(obj)
     
     def encode(self,obj):
         '''encode an object, returning a utf8 encoded string (not a unicode string!)'''
