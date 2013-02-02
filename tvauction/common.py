@@ -6,10 +6,16 @@ BidderInfo = namedtuple('BidderInfo', ('id','length','bids','attrib_values'))
 # bids: [(price, amount),...]
 # attrib_values {slot_id_1: value_1, ...}
 
+class _JSONEncoder(simplejson.JSONEncoder):
+    def default(self, o):
+        try: iterable = iter(o)
+        except TypeError: pass
+        else: return list(iterable)
+        return simplejson.JSONEncoder.default(self, o)
 class _JSON(object):
     '''JSON implementation used for en/decoding'''
     def __init__(self):
-        self.encoder = simplejson.JSONEncoder(ensure_ascii=False,separators=(',', ':'))
+        self.encoder = _JSONEncoder(ensure_ascii=False,separators=(',', ':'))
         self.decoder = simplejson.JSONDecoder(object_hook=self.transformNumericKeys)
         
     @classmethod

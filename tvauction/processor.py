@@ -483,23 +483,24 @@ class TvAuctionProcessor(object):
         reservePrice = self.reservePriceClass(gwd)
         _revenue_after, prices_after = reservePrice.solve(winners, winners_slots, prices_core)
         
+        def reduceTupleKey(tupled_dict):
+            return dict((k,val) for ((k,_j),val) in tupled_dict.iteritems())
         
         return {
             'winners': sorted(winners),
-            'winners_slots': winners_slots,
-            'prices_bid': dict(((k,j), bidder_infos[k].bids[j][0]) for (k,j) in winners),
-            'prices_vcg': prices_vcg,
-            'prices_core': prices_core,
-            'prices_final': prices_after,
+            'winners_slots': reduceTupleKey(winners_slots),
+            'prices_bid': dict((k, bidder_infos[k].bids[j][0]) for (k,j) in winners),
+            'prices_vcg': reduceTupleKey(prices_vcg),
+            'prices_core': reduceTupleKey(prices_core),
+            'prices_final': reduceTupleKey(prices_after),
             'step_info': step_info,
             'gaps': gwd.gaps,
-            'coalitions': gwd.coalitions # TODO change analyzers to cope with switches now
+            'coalitions': sorted(gwd.coalitions.iteritems(), key=lambda (k,v): v, reverse=True)
         }
      
 if __name__ == '__main__':
     import os
     import sys
-    import cPickle
     from optparse import OptionParser
     from common import json, convertToNamedTuples
 
@@ -540,6 +541,4 @@ if __name__ == '__main__':
     
     # solve and print
     res = proc.solve(slots, bidder_infos, options.time_limit or None, options.time_limit_gwd or None, options.epgap or None)
-    del res['coalitions']
-    
-    print cPickle.dumps(res)
+    print json.encode(res)

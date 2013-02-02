@@ -23,8 +23,7 @@ def _drawWinners(file_prefix, res, scenario):
     fig = plt.figure(None,figsize=(20,6))
     
     # the first graph shows all winners and how much they paid
-    winners = res['winners']
-    winners_index = np.array([k for (k,j) in res['winners']])
+    winners = np.array([k for (k,j) in res['winners']])
     width = 0.8
     
     ax1 = fig.add_subplot(111)
@@ -34,13 +33,13 @@ def _drawWinners(file_prefix, res, scenario):
     bar_labels = []
     for nr, (ptype,pcolor) in enumerate(zip(['bid','vcg','core','final'],[(0,1,1),(0,0,0),(1,0,1),(1,1,0)])):
         bar_width = width - nr*width*0.2
-        vals = [v for (kj,v) in sorted(res['prices_%s' % ptype].iteritems()) if kj in winners]
-        bar = ax1.bar(winners_index-bar_width*0.5, vals, bar_width, color=pcolor,linewidth=0.5)
+        vals = [v for (k,v) in sorted(res['prices_%s' % ptype].iteritems()) if k in winners]
+        bar = ax1.bar(winners-bar_width*0.5, vals, bar_width, color=pcolor,linewidth=0.5)
         bars.append(bar)
         bar_labels.append(ptype)
 
-    ax1.set_xticks(winners_index)
-    ax1.set_xticklabels(winners_index)
+    ax1.set_xticks(winners)
+    ax1.set_xticklabels(winners)
     ax_legend = ax1.legend(bars, bar_labels, loc='upper center', ncol=4, bbox_to_anchor=(0.5,1.12))
     fig.savefig(file_prefix+'_prices.svg', bbox_inches='tight', bbox_extra_artists=[ax_legend])
     
@@ -133,7 +132,7 @@ def _drawSlotAssignments(file_prefix, res, scenario):
     ax = fig.add_subplot(111)
     
     bidders_data = []
-    for (k,j), s_assignments in sorted(res['winners_slots'].iteritems()):
+    for k, s_assignments in sorted(res['winners_slots'].iteritems()):
         ad_length = bidder_infos[k].length
         bidder_assignment = sorted(s_assignments)
         bidder_height = [ad_length]*len(s_assignments)
@@ -163,7 +162,6 @@ if __name__ == '__main__':
     import os
     import optparse
     import hashlib
-    import cPickle
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
     from tvauction.common import json, convertToNamedTuples
         
@@ -200,7 +198,7 @@ if __name__ == '__main__':
     if options.add_prefix: graph_file_prefix += options.add_prefix
         
     # decode the whole result as object
-    result = cPickle.loads(result)
+    result = json.decode(result)
     
     # prefix it with infos about the scenario if available
     if options.scenopts and options.offset is not None:
