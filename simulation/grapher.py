@@ -143,11 +143,11 @@ def _drawSlotAssignments(file_prefix, res, scenario):
             if s_id in bidder_assignment:
                 slots_y[s_id] += ad_length
     for nr, (k, bidder_assignment, bidder_height, bidder_bottom) in enumerate(bidders_data):
-        bars = ax.bar(bidder_assignment, bidder_height, bottom=bidder_bottom, linewidth=0.5, edgecolor='grey', color=matplotlib.cm.jet(1.*nr/len(bidder_infos)))
+        bars = ax.bar(bidder_assignment, bidder_height, bottom=bidder_bottom, linewidth=0.5, edgecolor='black', color=matplotlib.cm.jet(1.*nr/len(bidder_infos)))
 
-#    bars = ax.bar(s_assignments, [ad_length]*len(s_assignments), bottom=sorted([s_y for (s_id,s_y) in slots_y.items() if s_id in s_assignments]))
     slots_remaining = sorted((s_id,s.length-slots_y[s_id]) for (s_id,s) in slots.iteritems())
-    ax.bar(*zip(*slots_remaining), linewidth=0.5, color='white', edgecolor='grey', bottom=[s_y for (s_id,s_y) in sorted(slots_y.iteritems())])
+    bars_remaining = ax.bar(*zip(*slots_remaining), bottom=[s_y for (s_id,s_y) in sorted(slots_y.iteritems())], linewidth=0.5, edgecolor='black', color='white')
+    
     fig.savefig(file_prefix+'_slot_assignments.svg')
 
 def drawResult(file_prefix, res, scenario):
