@@ -83,7 +83,7 @@ class Gwd(object):
         self.gaps.append( (prob.name, prob.solver.epgap_actual) )
         
         logging.info('wdp:\tstatus: %s, gap: %.2f' % (pu.LpStatus[solver_status], prob.solver.epgap_actual or -1))
-        logging.info('bid:\tvalue %d, members: %s' % (self.getCoalitionValue(winners), sorted(winners)))
+        logging.info('bid:\tvalue %d, members: %s' % (self.getCoalitionValue(winners), sorted(k for (k,_j) in winners)))
         return winners, winners_slots
     
     
@@ -98,16 +98,16 @@ class Gwd(object):
         return frozenset(coalition)
     
     def getSlotAssignments(self, coalition, x):
-        coalition_slots = dict((kj,[]) for kj in coalition)
+        coalition_slots = dict((k,[]) for (k,j) in coalition)
 #        print 'coa', coalition
         for i, x_i in x.iteritems():
             slot_winners = []
             for (k, x_ik) in x_i.iteritems():
                 for (j, x_ikj) in x_ik.iteritems():
                     if round(x_ikj.value() or 0) == 1 and (k,j) in coalition:
-                        slot_winners.append((k,j))
+                        slot_winners.append(k)
 #            print slot_winners
-            for kj in slot_winners: coalition_slots[kj].append(i)
+            for k in slot_winners: coalition_slots[k].append(i)
         return coalition_slots
     
     def calculateCoalitionValue(self, coalition):
@@ -150,10 +150,10 @@ class ReservePrice(object):
     def solve(self, winners, winners_slots, prices_before):
         slots, bidder_infos = self.gwd.slots, self.gwd.bidder_infos
         prices_after = {}
-        for (k,j),slot_ids_won in winners_slots.iteritems():
+        for k,slot_ids_won in winners_slots.iteritems():
             bidder_info = bidder_infos[k]
             price_reserve = bidder_info.length*sum(slots[i].price for i in slot_ids_won)
-            prices_after[(k,j)] = max(price_reserve, prices_before[(k,j)])
+            prices_after[k] = max(price_reserve, prices_before[k])
         revenue_after = self.gwd.calculateSumPrices(prices_after)
         return revenue_after, prices_after
 
@@ -174,7 +174,7 @@ class InitialPricing(object):
         for (k,j) in winners:
             winner_bid = self.gwd.bidder_infos[k].bids[j][0]
             revenue_without_bidder = self.gwd.getCoalitionValue(winners_without_bidders[k])
-            res[(k,j)] = self.getPriceForBidder(winner_bid, revenue_bid, revenue_without_bidder) 
+            res[k] = self.getPriceForBidder(winner_bid, revenue_bid, revenue_without_bidder) 
         return res
         
 class Zero(InitialPricing):
@@ -211,7 +211,7 @@ class Vcg(InitialPricing):
         self.gwd.addToCoalitions(winners_without_w, self.gwd.calculateCoalitionValue(winners_without_w), 'vcg')
         self.gwd.gaps.append( (prob_vcg.name, prob_vcg.solver.epgap_actual) )
         logging.info('vcg:\tstatus: %s, gap: %.2f' % (pu.LpStatus[solver_status], prob_vcg.solver.epgap_actual or -1))
-        logging.info('vcg:\tvalue: %d, members: %s' % (self.gwd.getCoalitionValue(winners_without_w), sorted(winners_without_w)))
+        logging.info('vcg:\tvalue: %d, members: %s' % (self.gwd.getCoalitionValue(winners_without_w), sorted(k for (k,_j) in winners_without_w)))
         
         # restore coefficients
         for j, winner_coeff in winner_coeffs.iteritems():
@@ -242,9 +242,14 @@ class CorePricing(object):
         prob_sep.name = name
         prob_sep.objective = objective.copy()
         
-        # modify prices according to prices_t.
-        for (k,j), price_t_kj in prices_t.iteritems():
-            prob_sep.objective[y[k][j]] = price_t_kj 
+        # modify prices according to prices_t
+        # we subtract the b_k^* - p_k from each bid, so additional constraints are not needed
+        for (k, j_best) in winners:
+            b_k_best = self.gwd.bidder_infos[k].bids[j_best][0]
+            price_t_k = prices_t[k]
+            for j, y_kj in y[k].iteritems():
+                bid_jk = self.gwd.bidder_infos[k].bids[j][0]
+                prob_sep.objective[y_kj] = bid_jk - (b_k_best + price_t_k)
     
     def _createEbpo(self, name, winners, prices_vcg):
         bidder_infos = self.gwd.bidder_infos
@@ -257,17 +262,17 @@ class CorePricing(object):
         
         # variables: m, π_j 
         m = pu.LpVariable('m',cat=pu.LpContinuous)
-        pi = dict(((k,j),pu.LpVariable('pi_%d_%d' % (k,j), cat=pu.LpContinuous, lowBound=prices_vcg[(k,j)], upBound=bidder_infos[k].bids[j][0])) for (k,j) in winners)
+        pi = dict((k,pu.LpVariable('pi_%d' % k, cat=pu.LpContinuous, lowBound=prices_vcg[k], upBound=bidder_infos[k].bids[j][0])) for (k,j) in winners)
         # add objective function
         prob_ebpo += sum(pi.itervalues()) + epsilon*m
         
         # add pi constraints
-        for kj in winners: prob_ebpo += (pi[kj]-m <= prices_vcg[kj], 'pi_constr_%d_%d' % kj)
+        for (k,j) in winners: prob_ebpo += (pi[k]-m <= prices_vcg[k], 'pi_constr_%d' % k)
         
         # add coalition constraints for all coalitions without the winning coalition
         if self.algorithm==self.REUSE_COALITIONS:
             for c in set(self.gwd.coalitions) - set(winners):
-                prob_ebpo += sum(pi[wnb] for wnb in winners-c) >= self.gwd.getCoalitionValue(c) - sum(bidder_infos[k].bids[j][0] for (k,j) in winners&c)
+                prob_ebpo += sum(pi[k] for (k,j) in winners-c) >= self.gwd.getCoalitionValue(c) - sum(bidder_infos[k].bids[j][0] for (k,j) in winners&c)
         return prob_ebpo, pi
     
     
@@ -364,7 +369,7 @@ class CorePricing(object):
             self.gwd.addToCoalitions(blocking_coalition, self.gwd.calculateCoalitionValue(blocking_coalition), 'sep_%d' % cnt)
             self.gwd.gaps.append( (prob_sep.name, prob_sep.solver.epgap_actual) )
             logging.info('sep:\tstatus: %s, gap: %.2f' % (pu.LpStatus[solver_status], prob_sep.solver.epgap_actual or -1))
-            logging.info('sep:\tvalue: %d, coalition value: %d, members: %s' % (obj_value_sep, self.gwd.getCoalitionValue(blocking_coalition), sorted(blocking_coalition)))
+            logging.info('sep:\tvalue: %d, coalition value: %d, members: %s' % (obj_value_sep, self.gwd.getCoalitionValue(blocking_coalition), sorted(k for (k,_j) in blocking_coalition)))
             
             # save the value: z(π^t)
             obj_value_sep, obj_value_sep_last = prob_sep.objective.value(), obj_value_sep
@@ -392,12 +397,12 @@ class CorePricing(object):
             # if there is no ebpo or if the winners changed and we use an appropriate algorithm, recreate the ebpo
             if prob_ebpo is None or self.algorithm in (self.SWITCH_COALITIONS, self.REUSE_COALITIONS) and new_winners:
                 prices_vcg = self.vcg.getPricesForBidders(winners, winners_without_bidders)
-                logging.info('ebpo:\tcreating - coalition value: %d, members: %s' % (self.gwd.getCoalitionValue(winners),sorted(winners)))
+                logging.info('ebpo:\tcreating - coalition value: %d, members: %s' % (self.gwd.getCoalitionValue(winners),sorted(k for (k,_j) in winners)))
                 prob_ebpo, pi = self._createEbpo('ebpo_%d' % cnt, winners, prices_vcg)
                 
             # else if the winners did not change and we are using switch/reuse, add the constraint
             elif self.algorithm in (self.SWITCH_COALITIONS, self.REUSE_COALITIONS) and not new_winners:
-                prob_ebpo += sum(pi[wnb] for wnb in winners-blocking_coalition) >= self.gwd.getCoalitionValue(blocking_coalition) - sum(bidder_infos[k].bids[j][0] for (k,j) in winners&blocking_coalition)
+                prob_ebpo += sum(pi[k] for (k,j) in winners-blocking_coalition) >= self.gwd.getCoalitionValue(blocking_coalition) - sum(bidder_infos[k].bids[j][0] for (k,j) in winners&blocking_coalition)
             
             # else if we trim the values, we always call this block
             elif self.algorithm==self.TRIM_VALUES:
@@ -483,16 +488,13 @@ class TvAuctionProcessor(object):
         reservePrice = self.reservePriceClass(gwd)
         _revenue_after, prices_after = reservePrice.solve(winners, winners_slots, prices_core)
         
-        def reduceTupleKey(tupled_dict):
-            return dict((k,val) for ((k,_j),val) in tupled_dict.iteritems())
-        
         return {
             'winners': sorted(winners),
-            'winners_slots': reduceTupleKey(winners_slots),
+            'winners_slots': winners_slots,
             'prices_bid': dict((k, bidder_infos[k].bids[j][0]) for (k,j) in winners),
-            'prices_vcg': reduceTupleKey(prices_vcg),
-            'prices_core': reduceTupleKey(prices_core),
-            'prices_final': reduceTupleKey(prices_after),
+            'prices_vcg': prices_vcg,
+            'prices_core': prices_core,
+            'prices_final': prices_after,
             'step_info': step_info,
             'gaps': gwd.gaps,
             'coalitions': sorted(gwd.coalitions.iteritems(), key=lambda (k,v): v, reverse=True)
