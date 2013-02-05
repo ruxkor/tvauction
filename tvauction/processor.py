@@ -117,7 +117,7 @@ class Gwd(object):
         return sum(prices.itervalues())
         
     def getCoalitionValue(self, coalition):
-        return self.coalitions[coalition]
+        return self.coalitions[coalition] if coalition else 0
     
     def addToCoalitions(self, coalition, value, where, is_new_best=None):
         # check if is new best

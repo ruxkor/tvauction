@@ -54,7 +54,7 @@ class Test(unittest.TestCase):
         gevent.joinall((
             gevent.spawn(handle), 
             gevent.spawn(send)
-        ), timeout=1.0,  raise_error=True)
+        ), timeout=1.0, raise_error=True)
         
     def testIsNotFree(self):
         self.supervisor.isFree = lambda *a: False
@@ -67,7 +67,7 @@ class Test(unittest.TestCase):
         gevent.joinall((
             gevent.spawn(handle), 
             gevent.spawn(send)
-        ), timeout=1.0,  raise_error=True)
+        ), timeout=1.0, raise_error=True)
         
     def testSendEvenIfNotFree(self):
         self.supervisor.isFree = lambda *a: False
@@ -82,7 +82,7 @@ class Test(unittest.TestCase):
         gevent.joinall((
             gevent.spawn(handle), 
             gevent.spawn(send)
-        ), timeout=1.0,  raise_error=True)
+        ), timeout=1.0, raise_error=True)
         
     def testSendInvalidData(self):
         def send():
@@ -96,7 +96,7 @@ class Test(unittest.TestCase):
         gevent.joinall((
             gevent.spawn(handle), 
             gevent.spawn(send)
-        ), timeout=1.0,  raise_error=True)
+        ), timeout=1.0, raise_error=True)
 
     def testSendValidData(self):
         def send():
@@ -110,7 +110,7 @@ class Test(unittest.TestCase):
         gevent.joinall((
             gevent.spawn(handle), 
             gevent.spawn(send)
-        ), timeout=1.0,  raise_error=True)
+        ), timeout=1.0, raise_error=True)
         
     def testSendWhileRunning(self):
         class SleepyWorker(SupervisorTask):
@@ -140,7 +140,7 @@ class Test(unittest.TestCase):
             gevent.spawn(handle), 
             gevent.spawn(send),
             gevent.spawn_later(0.1, send)
-        ), timeout=10.0,  raise_error=True)
+        ), timeout=10.0, raise_error=True)
         
 logging.basicConfig(level=logging.CRITICAL)
 if __name__ == '__main__':

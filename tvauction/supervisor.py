@@ -26,19 +26,16 @@ class SupervisorTask(Process):
         
     def run(self):
         ctx = tzmq.Context()
-        f = open('/tmp/bla','w')
-        f.write('uiui')
-        f.close()
         socket_supervisor = ctx.socket(tzmq.REP)
         socket_supervisor.connect('ipc://supervisor_task.ipc')
         data = unserialize(socket_supervisor.recv())
         try:
-            scenario, options = data
+            auction_id, scenario, options = data
             convertToNamedTuples(scenario)
             res = self._solve(scenario, options)
-            socket_supervisor.send(serialize([None, res]))
+            socket_supervisor.send(serialize([None, auction_id, res]))
         except Exception, err:
-            socket_supervisor.send(serialize(['%s' % err, None]))
+            socket_supervisor.send(serialize(['%s' % err, auction_id, None]))
             
     def _solve(self, scenario, options):
         slots, bidder_infos = scenario
@@ -87,7 +84,7 @@ class Supervisor(object):
         while True:
             data = unserialize(self.socket_middleware_sub.recv())
             logging.debug('handleMiddlewareSubscription\tgot: %s', data)
-            action, params = data[0], data[1:]
+            action, _auction_id, _params = data[0], data[1], data[2:]
             if action == 'is_free':
                 resp = [action, None, self.isFree()]
                 self.queue.put(resp)
@@ -102,17 +99,20 @@ class Supervisor(object):
             self.socket_middleware_rr.send(serialize(data))
             
             resp = self.socket_middleware_rr.recv()
-            if resp: resp = unserialize(resp)
+            if not resp: return 
+            
+            resp = unserialize(resp)
+            action, auction_id, params = resp[0], resp[1], resp[2:] 
             
             logging.info('response: %s', resp)
-            if resp and self.isFree():
+            if action == 'solve' and self.isFree():
                 if self.worker: self.worker.terminate()
                 self.worker = self.worker_class()
                 self.worker.start()
                 self.socket_worker.send('', gzmq.SNDMORE)
-                self.socket_worker.send(serialize(resp))
-            elif resp:
-                self.socket_middleware_rr.send(serialize(['solve', 'in_use', None]))
+                self.socket_worker.send(serialize([auction_id]+params))
+            elif action == 'solve':
+                self.socket_middleware_rr.send(serialize(['solve', 'in_use', auction_id, None]))
                 logging.error('got response but am not free')
     
     def handleWorker(self):

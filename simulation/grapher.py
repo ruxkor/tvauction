@@ -172,7 +172,7 @@ if __name__ == '__main__':
     parser.set_usage('%prog [options] < result.pickle')
     parser.add_option('--scenopts', dest='scenopts', type='str', help='the options file used to generate the scenarios')
     parser.add_option('--scenarios', dest='scenarios', type='str', help='the scenarios file created by the generator')
-    parser.add_option('--offset', dest='offset', type='int', default=None, help='the scenario offset')
+    parser.add_option('--offset', dest='offset', type='int', default=0, help='the scenario offset')
     parser.add_option('--prefix', dest='add_prefix', type='str', help='anything else you would like to add to the graph filenames')
     parser.add_option('--graph-path', dest='graph_path', type='str', default='/tmp/tvauction_graphs', help='the base directory for the graphs. has to exist.')
     parser.epilog = 'If scenopts and offset is not passed, the first characters of the md5 of the scenario will be used'
