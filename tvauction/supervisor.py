@@ -84,7 +84,7 @@ class Supervisor(object):
         while True:
             data = unserialize(self.socket_middleware_sub.recv())
             logging.debug('handleMiddlewareSubscription\tgot: %s', data)
-            action, _auction_id, _params = data[0], data[1], data[2:]
+            action, _params = data[0], data[1:]
             if action == 'is_free':
                 resp = [action, None, self.isFree()]
                 self.queue.put(resp)
@@ -95,11 +95,12 @@ class Supervisor(object):
     def handleMiddlewareReqRep(self):
         while True:
             data = self.queue.get()
+            
             logging.debug('handleMiddlewareReqRep\tgot: %s', data)
             self.socket_middleware_rr.send(serialize(data))
-            
+
             resp = self.socket_middleware_rr.recv()
-            if not resp: return 
+            if not resp: continue
             
             resp = unserialize(resp)
             action, auction_id, params = resp[0], resp[1], resp[2:] 
@@ -112,7 +113,7 @@ class Supervisor(object):
                 self.socket_worker.send('', gzmq.SNDMORE)
                 self.socket_worker.send(serialize([auction_id]+params))
             elif action == 'solve':
-                self.socket_middleware_rr.send(serialize(['solve', 'in_use', auction_id, None]))
+                self.queue.put(['solve', 'in_use', auction_id, None])
                 logging.error('got response but am not free')
     
     def handleWorker(self):
@@ -132,13 +133,15 @@ def main():
     
     parser = OptionParser()
 #    parser.set_usage('%prog [options] < scenarios.json')
-    parser.add_option('--uri_middleware-sub', dest='uri_middleware_sub', default='tcp://127.0.0.1:10200')
-    parser.add_option('--uri_middleware-rr', dest='uri_middleware_rr', default='tcp://127.0.0.1:11200')
+    parser.add_option('--uri_middleware-sub', dest='uri_middleware_sub', default='tcp://127.0.0.1:10234')
+    parser.add_option('--uri_middleware-rr', dest='uri_middleware_rr', default='tcp://127.0.0.1:10235')
     options = parser.parse_args()[0]
     
     logging.info('started')
     ctx = gzmq.Context()
     supervisor = Supervisor(ctx, options.uri_middleware_sub, options.uri_middleware_rr)
     gevent.joinall(supervisor.initialize())
+
+
 if __name__ == '__main__':
     main()
