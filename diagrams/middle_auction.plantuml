@@ -1,0 +1,14 @@
+@startuml middle_auction.svg
+hide footbox
+Middleware -> Supervisor: <font color="#000099">\\emph{0MQ PUB}</font>\tisFree()
+Supervisor -> Middleware: <font color="#000099">\\emph{0MQ REQ}</font>\tfree [bool]
+alt free == True and allocated == False
+	Middleware --> Supervisor: <font color="#000099">\\emph{0MQ REP}</font>\tsolve(auction)
+	Supervisor -> Processor: solve(auction)
+	Processor --> Supervisor: allocation
+	Supervisor -> Middleware: <font color="#000099">\\emph{0MQ REQ}</font>\tauctionSolved(auction, allocation)
+	Middleware --> Supervisor: <font color="#000099">\\emph{0MQ REP}</font>\tACK
+else
+	Middleware --> Supervisor: <font color="#000099">\\emph{0MQ REP}</font>\tACK
+end
+@enduml

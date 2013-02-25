@@ -1,0 +1,34 @@
+@startuml bla.svg
+
+cloud "Client" {
+	frame "Web Browser" {
+		[TvAuction Front End] as tvf
+	}
+}
+
+node "TvAuction Web Interface" {
+	() "REST" as rhm
+	() "ZMQ" as zmqm
+	tvf ..> HTTP
+	HTTP -- [Static Web Server]
+	rhm -- [TvAuction Middleware]
+	[TvAuction Middleware] - zmqm
+	tvf ..> rhm
+}
+
+database "Database Server\n" {
+	[MySQL Server] - SQL
+	[TvAuction Middleware] ..> SQL
+}
+
+node "Processor Server\n" {
+	() ZMQ as zmqs
+	[TvAuction Supervisor] - zmqs
+	[TvAuction Supervisor] ..> zmqm
+	zmqs <.up. [TvAuction Middleware]
+	[TvAuction Processor]
+	[TvAuction Supervisor] --> [TvAuction Processor]
+	[TvAuction Supervisor] <-- [TvAuction Processor]
+}
+
+@enduml
