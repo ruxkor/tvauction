@@ -154,8 +154,8 @@ def drawResult(file_prefix, res, scenario):
     _drawWinners(file_prefix, res, scenario)
     _drawSteps(file_prefix, res, scenario)
     _drawGaps(file_prefix, res, scenario)
-    _drawBidderInfos(file_prefix, res, scenario)
-    _drawSlotAssignments(file_prefix, res, scenario)
+    if scenario: _drawBidderInfos(file_prefix, res, scenario)
+    if scenario: _drawSlotAssignments(file_prefix, res, scenario)
 
 if __name__ == '__main__':
     import sys
@@ -169,7 +169,7 @@ if __name__ == '__main__':
     logging.basicConfig(level=log_level)
     
     parser = optparse.OptionParser()
-    parser.set_usage('%prog [options] < result.pickle')
+    parser.set_usage('%prog [options] < result.json')
     parser.add_option('--scenopts', dest='scenopts', type='str', help='the options file used to generate the scenarios')
     parser.add_option('--scenarios', dest='scenarios', type='str', help='the scenarios file created by the generator')
     parser.add_option('--offset', dest='offset', type='int', default=0, help='the scenario offset')

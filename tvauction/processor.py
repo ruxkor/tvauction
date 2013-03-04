@@ -42,9 +42,7 @@ class Gwd(object):
             cons.append( (f <= slot.length , 'slotlen_constr_%d' % i) )
             
         # match the bidders' demands regarding their attributes.
-        # attrib_values has to be a list with the same length as the slots list
         for (k,bidder_info) in bidder_infos.iteritems():
-            assert len(slots) == len(bidder_info.attrib_values)
             M = sum(bidder_info.attrib_values.itervalues())*2
             for (j, (_bid_price, attrib_min)) in enumerate(bidder_info.bids):
                 f = sum(attrib_value*x[i][k][j] for (i,attrib_value) in bidder_info.attrib_values.iteritems())
@@ -93,7 +91,7 @@ class Gwd(object):
         coalition = []
         for k, y_k in y.iteritems():
             for j, y_kj in y_k.iteritems():
-                if round(y_kj.value()) == 1:
+                if round(y_kj.value() or 0) == 1:
                     coalition.append((k,j))
         return frozenset(coalition)
     
@@ -372,7 +370,7 @@ class CorePricing(object):
             logging.info('sep:\tvalue: %d, coalition value: %d, members: %s' % (obj_value_sep, self.gwd.getCoalitionValue(blocking_coalition), sorted(k for (k,_j) in blocking_coalition)))
             
             # save the value: z(π^t)
-            obj_value_sep, obj_value_sep_last = prob_sep.objective.value(), obj_value_sep
+            obj_value_sep, obj_value_sep_last = prob_sep.objective.value() or 0, obj_value_sep
             
 
             # check for no blocking coalition exists. if this happened several times, break

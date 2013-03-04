@@ -2,6 +2,8 @@
 # -*- coding: utf-8; -*-
 
 import logging
+import traceback
+
 from common import json, convertToNamedTuples
 from processor import TvAuctionProcessor
 
@@ -27,7 +29,7 @@ class SupervisorTask(Process):
     def run(self):
         ctx = tzmq.Context()
         socket_supervisor = ctx.socket(tzmq.REP)
-        socket_supervisor.connect('ipc://supervisor_task.ipc')
+        socket_supervisor.connect('ipc:///tmp/supervisor_task.ipc')
         data = unserialize(socket_supervisor.recv())
         try:
             auction_id, scenario, options = data
@@ -35,7 +37,8 @@ class SupervisorTask(Process):
             res = self._solve(scenario, options)
             socket_supervisor.send(serialize([None, auction_id, res]))
         except Exception, err:
-            socket_supervisor.send(serialize(['%s' % err, auction_id, None]))
+            logging.error('could not solve: %d. %s' % (auction_id, traceback.format_exc()))
+            socket_supervisor.send(serialize(['Error: %s' % err, auction_id, None]))
             
     def _solve(self, scenario, options):
         slots, bidder_infos = scenario
@@ -54,7 +57,7 @@ class Supervisor(object):
         self.socket_worker = ctx.socket(gzmq.DEALER)
         self.socket_middleware_sub.connect(uri_middleware_sub)
         self.socket_middleware_rr.connect(uri_middleware_rr)
-        self.socket_worker.bind('ipc://supervisor_task.ipc')
+        self.socket_worker.bind('ipc:///tmp/supervisor_task.ipc')
         self.socket_middleware_sub.setsockopt(gzmq.SUBSCRIBE,'')
         self.queue = Queue()
         self.worker = None
@@ -103,7 +106,7 @@ class Supervisor(object):
             if not resp: continue
             
             resp = unserialize(resp)
-            action, auction_id, params = resp[0], resp[1], resp[2:] 
+            action, auction_id, params = resp[0], resp[1], resp[2:]
             
             logging.info('response: %s', resp)
             if action == 'solve' and self.isFree():
@@ -118,12 +121,12 @@ class Supervisor(object):
     
     def handleWorker(self):
         while True:
-            self.socket_worker.recv()
+            _req_id = self.socket_worker.recv()
             data = unserialize(self.socket_worker.recv())
             logging.debug('handleWorker\tgot: %s', data)
             self.queue.put(['solve'] + data)
             
-    
+
 def main():
     import os
     from optparse import OptionParser
