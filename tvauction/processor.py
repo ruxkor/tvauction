@@ -97,14 +97,12 @@ class Gwd(object):
     
     def getSlotAssignments(self, coalition, x):
         coalition_slots = dict((k,[]) for (k,j) in coalition)
-#        print 'coa', coalition
         for i, x_i in x.iteritems():
             slot_winners = []
             for (k, x_ik) in x_i.iteritems():
                 for (j, x_ikj) in x_ik.iteritems():
                     if round(x_ikj.value() or 0) == 1 and (k,j) in coalition:
                         slot_winners.append(k)
-#            print slot_winners
             for k in slot_winners: coalition_slots[k].append(i)
         return coalition_slots
     
