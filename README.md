@@ -16,6 +16,7 @@ Requirements
 * Python 2.7
 * GUROBI 5.x
 * PuLP-OR (https://github.com/ruxkor/pulp-or)
+* Gevent-ZeroMQ 0.2.5
 
 License
 -------
